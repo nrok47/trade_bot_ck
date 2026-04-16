@@ -1,22 +1,18 @@
 """
-Polymarket Binary Arbitrage Bot
-================================
-Strategy: Binary Arbitrage
-  - Scans Polymarket prediction markets every N seconds
-  - A binary market has two outcomes: YES and NO
-  - Each resolved contract pays exactly $1.00 to the winning side
-  - If  YES_ask + NO_ask < $1.00  →  guaranteed profit buying both sides
-  - Bot buys both legs simultaneously and waits for market resolution
+Binance Grid Trading Bot
+========================
+กลยุทธ์ Grid Trading:
+  - แบ่งช่วงราคาเป็น N ระดับ (grid lines)
+  - วาง limit BUY ใต้ราคาปัจจุบัน, limit SELL เหนือราคาปัจจุบัน
+  - เมื่อ BUY เต็ม → วาง SELL สูงขึ้น 1 grid (lock กำไร)
+  - เมื่อ SELL เต็ม → วาง BUY ต่ำลง 1 grid (วนใหม่)
+  - กำไรต่อรอบ ≈ grid_spacing × qty
 
 Usage:
-  1. Copy .env.example → .env and fill in your credentials
-  2. Set DRY_RUN=true to scan without placing orders (recommended first)
-  3. python bot.py
-
-Safety defaults:
-  - DRY_RUN=true by default — will NOT place real orders until you change it
-  - MAX_TRADE_SIZE_USDC limits exposure per trade
-  - MAX_OPEN_POSITIONS_USDC limits total exposure
+  1. cp .env.example .env  แล้วกรอก API key
+  2. ตั้งค่าช่วงราคาใน .env ให้ตรงกับราคาตลาดปัจจุบัน
+  3. python bot.py          (DRY_RUN=true โดย default)
+  4. ตรวจสอบผลลัพธ์ก่อน แล้วค่อยตั้ง DRY_RUN=false
 """
 from __future__ import annotations
 
@@ -26,20 +22,26 @@ import sys
 import time
 
 from rich.console import Console
+from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 from config import config
-from executor import executor
-from scanner import scanner, ArbOpportunity
+from binance_client import binance
+from grid import GridEngine, OrderSide
 
-# ── Logging ──────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.FileHandler("grid_bot.log"),
+        logging.StreamHandler(sys.stdout),
+    ],
 )
 logger = logging.getLogger("bot")
 console = Console()
@@ -50,7 +52,7 @@ _running = True
 
 def _handle_signal(sig, frame):
     global _running
-    console.print("\n[yellow]Shutting down…[/yellow]")
+    console.print("\n[yellow]กำลังหยุดบอท...[/yellow]")
     _running = False
 
 
@@ -58,103 +60,198 @@ signal.signal(signal.SIGINT, _handle_signal)
 signal.signal(signal.SIGTERM, _handle_signal)
 
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# ── Dashboard builders ────────────────────────────────────────────────────────
 
-def _build_status_panel(cycle: int, opportunities: list[ArbOpportunity]) -> Panel:
+def _header_panel(current_price: float, cycle: int) -> Panel:
     mode = "[bold red]LIVE[/bold red]" if not config.DRY_RUN else "[bold yellow]DRY RUN[/bold yellow]"
+    content = (
+        f"Mode: {mode}   Symbol: [cyan]{config.SYMBOL}[/cyan]   "
+        f"ราคาปัจจุบัน: [bold green]${current_price:,.2f}[/bold green]   "
+        f"Cycle: {cycle}"
+    )
+    return Panel(content, title="[bold]Binance Grid Bot[/bold]", border_style="blue")
+
+
+def _config_panel() -> Panel:
     lines = [
-        f"Mode: {mode}   Cycle: {cycle}   Open: ${executor.open_usdc:.2f} / ${config.MAX_OPEN_POSITIONS_USDC:.2f}",
-        f"Trades executed: {len(executor.trade_history)}   "
-        f"Expected profit: ${executor.total_profit_usdc:.4f} USDC",
-        f"Opportunities found this scan: {len(opportunities)}",
+        f"ช่วงราคา   : ${config.LOWER_PRICE:,.0f} – ${config.UPPER_PRICE:,.0f}",
+        f"จำนวน Grid : {config.GRID_COUNT} levels  (ห่างกัน ${config.grid_spacing:,.2f})",
+        f"USDT/Grid  : ${config.USDT_PER_GRID:.2f}",
+        f"ทุนรวม     : ~${config.total_usdt_required:.2f} USDT",
     ]
-    return Panel("\n".join(lines), title="Polymarket Arb Bot", border_style="green")
+    return Panel("\n".join(lines), title="Config", border_style="dim")
 
 
-def _build_opp_table(opportunities: list[ArbOpportunity]) -> Table:
+def _stats_panel(engine: GridEngine) -> Panel:
+    s = engine.stats
+    open_count = len(engine.open_orders())
+    profit_color = "green" if s.realized_profit_usdt >= 0 else "red"
+    lines = [
+        f"Open orders   : {open_count}",
+        f"BUY  filled   : {s.total_buys_filled}",
+        f"SELL filled   : {s.total_sells_filled}",
+        f"Realized P&L  : [bold {profit_color}]${s.realized_profit_usdt:.4f} USDT[/bold {profit_color}]",
+        f"Runtime       : {s.runtime_hours:.2f} ชั่วโมง",
+    ]
+    return Panel("\n".join(lines), title="Stats", border_style="green")
+
+
+def _grid_table(engine: GridEngine, current_price: float) -> Table:
     table = Table(box=box.SIMPLE_HEAVY, show_header=True, header_style="bold cyan")
-    table.add_column("Market", style="white", no_wrap=False, max_width=55)
-    table.add_column("YES ask", justify="right", style="green")
-    table.add_column("NO ask", justify="right", style="green")
-    table.add_column("Cost", justify="right", style="yellow")
-    table.add_column("Gross%", justify="right", style="magenta")
-    table.add_column("Net USDC", justify="right", style="bold green")
+    table.add_column("Level", justify="center", style="dim", width=6)
+    table.add_column("ราคา (USDT)", justify="right", width=14)
+    table.add_column("ด้าน", justify="center", width=6)
+    table.add_column("สถานะ", justify="center", width=12)
+    table.add_column("qty", justify="right", width=12)
 
-    for opp in opportunities[:20]:  # show top 20
-        table.add_row(
-            opp.market.question[:55],
-            f"{opp.market.yes_book.best_ask:.4f}",
-            f"{opp.market.no_book.best_ask:.4f}",
-            f"{opp.market.arb_cost:.4f}",
-            f"{opp.gross_profit_pct:.2f}%",
-            f"${opp.net_profit_usdc:.4f}",
-        )
+    # Build a lookup: price → GridOrder (latest)
+    price_to_order: dict[float, object] = {}
+    for o in engine.orders.values():
+        price_to_order[o.price] = o
 
-    if not opportunities:
-        table.add_row("[dim]No arbitrage opportunities found[/dim]", "", "", "", "", "")
+    for i, price in enumerate(reversed(engine.levels)):
+        level_idx = len(engine.levels) - 1 - i
+        order = price_to_order.get(price)
+
+        # Highlight current price band
+        if price <= current_price < (engine.levels[level_idx + 1] if level_idx + 1 < len(engine.levels) else price + 1):
+            price_str = f"[bold green]▶ {price:>12,.2f}[/bold green]"
+        else:
+            price_str = f"{price:>12,.2f}"
+
+        if order is None:
+            table.add_row(str(level_idx), price_str, "–", "[dim]ไม่มี order[/dim]", "–")
+        else:
+            side_str = "[green]BUY[/green]" if order.side == OrderSide.BUY else "[red]SELL[/red]"
+            if order.status == "FILLED":
+                status_str = "[bold green]FILLED[/bold green]"
+            elif order.status == "NEW":
+                status_str = "[yellow]OPEN[/yellow]"
+            else:
+                status_str = f"[dim]{order.status}[/dim]"
+            table.add_row(str(level_idx), price_str, side_str, status_str, f"{order.qty:.6f}")
 
     return table
 
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
+def _recent_fills_panel(engine: GridEngine) -> Panel:
+    filled = sorted(
+        engine.filled_orders(),
+        key=lambda o: o.filled_at or 0,
+        reverse=True,
+    )[:8]
+
+    if not filled:
+        return Panel("[dim]ยังไม่มี order ที่เสร็จ[/dim]", title="Recent Fills", border_style="dim")
+
+    lines = []
+    for o in filled:
+        side_str = "[green]BUY [/green]" if o.side == OrderSide.BUY else "[red]SELL[/red]"
+        ts = time.strftime("%H:%M:%S", time.localtime(o.filled_at)) if o.filled_at else "–"
+        lines.append(f"{ts}  {side_str} @ ${o.price:>10,.2f}  qty={o.qty:.6f}")
+
+    return Panel("\n".join(lines), title="Recent Fills", border_style="magenta")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def run() -> None:
+    # Validate config
+    try:
+        config.validate()
+    except (ValueError, EnvironmentError) as exc:
+        console.print(f"[bold red]Config error: {exc}[/bold red]")
+        sys.exit(1)
+
+    # Print startup banner
     console.print(
         Panel.fit(
-            "[bold green]Polymarket Binary Arbitrage Bot[/bold green]\n"
-            f"Strategy : YES ask + NO ask < $1.00 → buy both legs\n"
-            f"Mode     : {'[bold red]LIVE TRADING[/bold red]' if not config.DRY_RUN else '[bold yellow]DRY RUN (no real orders)[/bold yellow]'}\n"
-            f"Min profit: ${config.MIN_PROFIT_USDC:.4f} USDC per scan\n"
-            f"Max trade : ${config.MAX_TRADE_SIZE_USDC:.2f} USDC\n"
-            f"Scan every: {config.SCAN_INTERVAL_SECONDS}s",
-            title="Config",
+            "[bold green]Binance Grid Trading Bot[/bold green]\n\n"
+            f"Symbol  : [cyan]{config.SYMBOL}[/cyan]\n"
+            f"ช่วงราคา: ${config.LOWER_PRICE:,.0f} – ${config.UPPER_PRICE:,.0f}\n"
+            f"Grid    : {config.GRID_COUNT} levels  (ห่างกัน ${config.grid_spacing:,.2f})\n"
+            f"ทุน/Grid: ${config.USDT_PER_GRID:.2f} USDT\n"
+            f"Mode    : {'[bold red]LIVE TRADING[/bold red]' if not config.DRY_RUN else '[bold yellow]DRY RUN — ไม่ส่ง order จริง[/bold yellow]'}",
+            title="เริ่มต้น",
             border_style="blue",
         )
     )
 
     if not config.DRY_RUN:
-        config.validate_for_live_trading()
-        console.print("[bold red]⚠  LIVE MODE — real orders will be placed![/bold red]")
-        time.sleep(3)  # brief pause so user can Ctrl+C
+        console.print("[bold red]⚠  LIVE MODE — จะส่ง order จริงใน 5 วินาที (Ctrl+C เพื่อยกเลิก)[/bold red]")
+        time.sleep(5)
+
+    # Check current price fits within grid
+    current_price = binance.get_price()
+    console.print(f"ราคาปัจจุบัน [cyan]{config.SYMBOL}[/cyan]: [bold green]${current_price:,.2f}[/bold green]")
+
+    if not (config.LOWER_PRICE < current_price < config.UPPER_PRICE):
+        console.print(
+            f"[bold red]⚠  ราคาปัจจุบัน ${current_price:,.2f} อยู่นอกช่วง Grid "
+            f"(${config.LOWER_PRICE:,.0f}–${config.UPPER_PRICE:,.0f})[/bold red]\n"
+            "[yellow]กรุณาปรับ LOWER_PRICE / UPPER_PRICE ใน .env ให้ครอบคลุมราคาปัจจุบัน[/yellow]"
+        )
+        sys.exit(1)
+
+    # Initialize grid
+    engine = GridEngine()
+    engine.initialize(current_price)
 
     cycle = 0
-    while _running:
-        cycle += 1
-        logger.info("=== Scan cycle %d ===", cycle)
+    with Live(console=console, refresh_per_second=1, screen=False) as live:
+        while _running:
+            cycle += 1
+            current_price = binance.get_price()
 
-        try:
-            opportunities = scanner.scan()
-        except Exception as exc:
-            logger.error("Scanner error: %s", exc)
-            opportunities = []
-
-        # Print dashboard
-        console.print(_build_status_panel(cycle, opportunities))
-        console.print(_build_opp_table(opportunities))
-
-        # Execute best opportunity (if any)
-        if opportunities:
-            best = opportunities[0]
-            logger.info("Executing best opportunity: %s", best.market.question[:60])
-            result = executor.execute(best)
-            if result.success:
-                console.print(f"[bold green]{result.summary()}[/bold green]")
-            else:
-                console.print(f"[bold red]{result.summary()}[/bold red]")
-
-        # Sleep until next cycle
-        for _ in range(int(config.SCAN_INTERVAL_SECONDS)):
-            if not _running:
+            # Safety: stop if loss exceeds limit
+            if engine.stats.realized_profit_usdt < -abs(config.MAX_LOSS_USDT):
+                console.print(
+                    f"[bold red]หยุดบอท: ขาดทุนเกิน ${config.MAX_LOSS_USDT:.2f} USDT[/bold red]"
+                )
                 break
-            time.sleep(1)
 
+            # Poll order fills and react
+            newly_filled = engine.poll()
+            if newly_filled:
+                for o in newly_filled:
+                    logger.info("Filled: %s @ %.2f", o.side.value, o.price)
+
+            # Build dashboard
+            layout = Layout()
+            layout.split_column(
+                Layout(_header_panel(current_price, cycle), size=3),
+                Layout(name="middle", size=8),
+                Layout(_grid_table(engine, current_price), name="grid"),
+                Layout(_recent_fills_panel(engine), size=12),
+            )
+            layout["middle"].split_row(
+                Layout(_config_panel()),
+                Layout(_stats_panel(engine)),
+            )
+            live.update(layout)
+
+            # Sleep until next poll
+            for _ in range(int(config.POLL_INTERVAL_SECONDS)):
+                if not _running:
+                    break
+                time.sleep(1)
+
+    # Shutdown: cancel all open orders
+    console.print("[yellow]กำลังยกเลิก open orders ทั้งหมด...[/yellow]")
+    binance.cancel_all_open_orders()
+
+    # Final summary
+    s = engine.stats
+    profit_color = "green" if s.realized_profit_usdt >= 0 else "red"
     console.print(
         Panel(
-            f"[bold]Session summary[/bold]\n"
-            f"Cycles run       : {cycle}\n"
-            f"Trades executed  : {len(executor.trade_history)}\n"
-            f"Expected profit  : ${executor.total_profit_usdc:.4f} USDC",
-            title="Done",
+            f"[bold]สรุปผลการทำงาน[/bold]\n\n"
+            f"Cycles       : {cycle}\n"
+            f"BUY filled   : {s.total_buys_filled}\n"
+            f"SELL filled  : {s.total_sells_filled}\n"
+            f"Realized P&L : [bold {profit_color}]${s.realized_profit_usdt:.4f} USDT[/bold {profit_color}]\n"
+            f"Runtime      : {s.runtime_hours:.2f} ชั่วโมง",
+            title="จบการทำงาน",
             border_style="yellow",
         )
     )
