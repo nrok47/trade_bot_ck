@@ -459,6 +459,8 @@ def run() -> None:
     last_midnight = time.strftime("%Y-%m-%d")
     _last_alert_upper = False
     _last_alert_lower = False
+    _last_heartbeat_cycle = 0
+    _heartbeat_interval = max(1, int(60 / config.POLL_INTERVAL_SECONDS))
 
     with Live(console=console, refresh_per_second=0.5, screen=True) as live:
         while _running:
@@ -573,26 +575,55 @@ def run() -> None:
             if engine._initialized and new_direction != current_direction:
                 if strategy.can_reset_now():
                     logger.info(
-                        "Trend เปลี่ยน: %s → %s — รีเซ็ต grid",
-                        current_direction.value, new_direction.value,
+                        "🔄 Trend เปลี่ยน: %s → %s | ราคา $%.4f"
+                        " | ยกเลิก orders เก่า รีเซ็ต grid ใหม่",
+                        current_direction.value, new_direction.value, current_price,
                     )
                     engine.reset()
                     strategy.mark_reset()
                     current_direction = new_direction
                     engine.initialize(current_price, current_direction)
                 else:
-                    logger.debug(
-                        "Trend เปลี่ยนเป็น %s แต่ยังอยู่ใน cooldown — รอก่อน",
-                        new_direction.value,
+                    logger.info(
+                        "⏳ Trend signal ใหม่: %s แต่ยัง cooldown — รอก่อน (ราคา $%.4f)",
+                        new_direction.value, current_price,
                     )
 
             # ── Poll order fills ──────────────────────────────────────────────
             newly_filled = engine.poll()
-            for o in newly_filled:
-                logger.info("Filled: %s @ %.4f", o.side.value, o.price)
+            # (detailed fill logs are emitted inside grid._on_fill)
 
             if config.is_futures:
                 futures_info = binance.get_futures_info()
+
+            # ── Heartbeat log (ทุก ~60 วินาที) ───────────────────────────────
+            if cycle - _last_heartbeat_cycle >= _heartbeat_interval:
+                _last_heartbeat_cycle = cycle
+                open_orders = engine.open_orders()
+                buy_waits = sorted(
+                    [f"${o.price:.4f}" for o in open_orders if o.side == OrderSide.BUY],
+                    reverse=True,
+                )
+                sell_waits = sorted(
+                    [f"${o.price:.4f}" for o in open_orders if o.side == OrderSide.SELL]
+                )
+                day_pct = (
+                    engine.stats.daily_profit_usdt / config.total_margin_required * 100
+                    if config.total_margin_required else 0
+                )
+                d_sign = "+" if day_pct >= 0 else ""
+                logger.info(
+                    "[STATUS] ราคา=$%.4f | %s %.0f%% | Grid=%s"
+                    " | รอ BUY: %s | รอ SELL: %s"
+                    " | P&L วันนี้: %s%.2f%% ($%.4f) | %.1fh",
+                    current_price,
+                    sig.direction, sig.strength * 100,
+                    current_direction.value,
+                    ",".join(buy_waits) if buy_waits else "ไม่มี",
+                    ",".join(sell_waits) if sell_waits else "ไม่มี",
+                    d_sign, day_pct, engine.stats.daily_profit_usdt,
+                    engine.stats.runtime_hours,
+                )
 
             # ── Build dashboard ───────────────────────────────────────────────
             range_panel = _range_panel(

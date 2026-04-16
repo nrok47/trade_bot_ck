@@ -133,6 +133,18 @@ class GridEngine:
         sells = sum(1 for o in self.orders.values() if o.side == OrderSide.SELL)
         logger.info("Grid ready: %d BUY  %d SELL  direction=%s", buys, sells, direction.value)
 
+        buy_waits = sorted(
+            [f"${o.price:.4f}" for o in self.orders.values() if o.side == OrderSide.BUY],
+            reverse=True,
+        )
+        sell_waits = sorted(
+            [f"${o.price:.4f}" for o in self.orders.values() if o.side == OrderSide.SELL]
+        )
+        if buy_waits:
+            logger.info("รอ BUY ที่: %s  (ราคาต้องลงถึง)", " | ".join(buy_waits))
+        if sell_waits:
+            logger.info("รอ SELL ที่: %s  (ราคาต้องขึ้นถึง)", " | ".join(sell_waits))
+
     def reset(self) -> None:
         """
         ยกเลิก order ทั้งหมด + ปิด open position (Futures) ก่อนล้าง state
@@ -245,8 +257,9 @@ class GridEngine:
                 sell_price = self.levels[sell_idx]
                 profit = (sell_price - go.price) * go.qty
                 logger.info(
-                    "BUY @ %.4f filled → SELL @ %.4f  profit≈%.4f USDT",
-                    go.price, sell_price, profit,
+                    "✅ BUY เข้า @ $%.4f (level %d)  qty=%.4f"
+                    " → วาง SELL รอที่ $%.4f | กำไรคาด +$%.4f USDT",
+                    go.price, go.level_index, go.qty, sell_price, profit,
                 )
                 self._place_sell_at_level(sell_idx, sell_price, go.qty)
             else:
@@ -263,10 +276,13 @@ class GridEngine:
                     profit = (go.price - buy_price) * go.qty
                     self.stats.realized_profit_usdt += profit
                     self.stats.daily_profit_usdt += profit
+                    d_sign = "+" if self.stats.daily_profit_usdt >= 0 else ""
                     logger.info(
-                        "SHORT SELL @ %.4f filled → BUY back @ %.4f  profit=%.4f USDT  "
-                        "total=%.4f",
-                        go.price, buy_price, profit, self.stats.realized_profit_usdt,
+                        "💰 SHORT ปิด SELL @ $%.4f → BUY back @ $%.4f"
+                        " | รอบนี้ +$%.4f | วันนี้ %s$%.4f | รวม $%.4f USDT",
+                        go.price, buy_price, profit,
+                        d_sign, self.stats.daily_profit_usdt,
+                        self.stats.realized_profit_usdt,
                     )
                     # Re-place SELL entry one level up (if available)
                     resell_idx = go.level_index + 1
@@ -283,9 +299,13 @@ class GridEngine:
                     profit = (go.price - buy_price) * go.qty
                     self.stats.realized_profit_usdt += profit
                     self.stats.daily_profit_usdt += profit
+                    d_sign = "+" if self.stats.daily_profit_usdt >= 0 else ""
                     logger.info(
-                        "SELL @ %.4f filled  profit=%.4f USDT  total=%.4f",
-                        go.price, profit, self.stats.realized_profit_usdt,
+                        "💰 SELL ปิด @ $%.4f | รอบนี้ +$%.4f USDT"
+                        " | วันนี้ %s$%.4f | รวม $%.4f USDT",
+                        go.price, profit,
+                        d_sign, self.stats.daily_profit_usdt,
+                        self.stats.realized_profit_usdt,
                     )
                     # Re-place BUY at the lower level
                     self._place_buy(buy_idx, buy_price)
