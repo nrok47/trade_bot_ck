@@ -213,8 +213,9 @@ def _grid_table(engine: GridEngine, current_price: float) -> Table:
 def _range_panel(grid_range: GridRange, current_price: float, alert_pct: float,
                   stop_pct: float, regrid_count: int = 0) -> Panel:
     status = check_boundary(current_price, grid_range, alert_pct, stop_pct)
-    upper_bar = min(int((1 - status.upper_dist_pct / alert_pct) * 5), 5) if status.upper_dist_pct >= 0 else 5
-    lower_bar = min(int((1 - status.lower_dist_pct / alert_pct) * 5), 5) if status.lower_dist_pct >= 0 else 5
+    # clamp to 0–5 to prevent negative multiplication → bar overflow
+    upper_bar = min(max(0, int((1 - status.upper_dist_pct / alert_pct) * 5)), 5) if status.upper_dist_pct >= 0 else 5
+    lower_bar = min(max(0, int((1 - status.lower_dist_pct / alert_pct) * 5)), 5) if status.lower_dist_pct >= 0 else 5
     upper_color = "red" if status.breached_upper else ("yellow" if status.near_upper else "green")
     lower_color = "red" if status.breached_lower else ("yellow" if status.near_lower else "green")
 
@@ -445,7 +446,7 @@ def run() -> None:
     _last_alert_upper = False
     _last_alert_lower = False
 
-    with Live(console=console, refresh_per_second=1, screen=False) as live:
+    with Live(console=console, refresh_per_second=1, screen=True) as live:
         while _running:
             cycle += 1
             current_price = binance.get_price()
