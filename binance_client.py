@@ -198,7 +198,7 @@ class BinanceClient:
         if config.DRY_RUN:
             logger.info("[DRY RUN] LIMIT BUY  %.6f %s @ %.2f  (%s)",
                         qty, config.SYMBOL, rounded_price, config.MARKET.upper())
-            return {"orderId": f"DRY_BUY_{int(price)}", "status": "NEW",
+            return {"orderId": f"DRY_BUY_{rounded_price:.6f}", "status": "NEW",
                     "side": "BUY", "price": str(rounded_price), "origQty": str(qty)}
 
         try:
@@ -234,7 +234,7 @@ class BinanceClient:
         if config.DRY_RUN:
             logger.info("[DRY RUN] LIMIT SELL %.6f %s @ %.2f  (%s)",
                         rounded_qty, config.SYMBOL, rounded_price, config.MARKET.upper())
-            return {"orderId": f"DRY_SELL_{int(price)}", "status": "NEW",
+            return {"orderId": f"DRY_SELL_{rounded_price:.6f}", "status": "NEW",
                     "side": "SELL", "price": str(rounded_price), "origQty": str(rounded_qty)}
 
         try:
