@@ -53,7 +53,12 @@ class BinanceClient:
             return self._symbol_info
 
         if config.is_futures:
-            info = self._client.futures_get_symbol_info(config.SYMBOL)
+            # futures_exchange_info() คืน dict ที่มี list "symbols"
+            exchange_info = self._client.futures_exchange_info()
+            info = next(
+                (s for s in exchange_info["symbols"] if s["symbol"] == config.SYMBOL),
+                None,
+            )
         else:
             info = self._client.get_symbol_info(config.SYMBOL)
 
@@ -67,13 +72,19 @@ class BinanceClient:
         qty_precision = int(round(-math.log10(step_size))) if step_size > 0 else 3
 
         if config.is_futures:
-            min_notional = float(filters.get("MIN_NOTIONAL", {}).get("notional", "5"))
+            min_notional = float(
+                filters.get("MIN_NOTIONAL", {}).get("notional", "5")
+            )
+            price_precision = int(info.get("pricePrecision", 4))
         else:
-            min_notional = float(filters.get("MIN_NOTIONAL", {}).get("minNotional", "10"))
+            min_notional = float(
+                filters.get("MIN_NOTIONAL", {}).get("minNotional", "10")
+            )
+            price_precision = int(info.get("quotePrecision", 2))
 
         self._symbol_info = SymbolInfo(
             symbol=config.SYMBOL,
-            price_precision=int(info.get("pricePrecision", info.get("quotePrecision", 2))),
+            price_precision=price_precision,
             qty_precision=qty_precision,
             min_qty=float(lot.get("minQty", "0.001")),
             min_notional=min_notional,
