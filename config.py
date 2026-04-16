@@ -57,9 +57,43 @@ class Config:
         return (self.UPPER_PRICE - self.LOWER_PRICE) / self.GRID_COUNT
 
     @property
+    def notional_per_grid(self) -> float:
+        """Effective order value (USDT) per grid after leverage."""
+        return self.USDT_PER_GRID * (self.LEVERAGE if self.is_futures else 1)
+
+    @property
+    def total_margin_required(self) -> float:
+        """Actual USDT needed in wallet (margin, not notional)."""
+        return self.USDT_PER_GRID * self.GRID_COUNT
+
+    @property
     def total_usdt_required(self) -> float:
-        base = self.USDT_PER_GRID * self.GRID_COUNT
-        return base / self.LEVERAGE if self.is_futures else base
+        return self.total_margin_required
+
+    def capital_warnings(self) -> list[str]:
+        """Return human-readable warnings about capital requirements."""
+        warnings = []
+        if self.total_margin_required > 0:
+            warnings.append(
+                f"ทุนที่ต้องใช้ทั้งหมด: ${self.total_margin_required:.2f} USDT "
+                f"(= {self.GRID_COUNT} grids × ${self.USDT_PER_GRID:.2f})"
+            )
+        if self.is_futures:
+            warnings.append(
+                f"Notional ต่อ grid: ${self.notional_per_grid:.2f} USDT "
+                f"(margin ${self.USDT_PER_GRID:.2f} × {self.LEVERAGE}x)"
+            )
+            if self.notional_per_grid < 5:
+                warnings.append(
+                    f"⚠  Notional ${self.notional_per_grid:.2f} ต่ำเกินไป — "
+                    "Binance กำหนด min $5 ต่อ order (ลด GRID_COUNT หรือเพิ่ม USDT_PER_GRID)"
+                )
+            if self.LEVERAGE > 10:
+                warnings.append(
+                    f"⚠  Leverage {self.LEVERAGE}x สูงมาก — "
+                    "ราคาเคลื่อนที่ 10% ก็อาจโดน Liquidate"
+                )
+        return warnings
 
 
 config = Config()

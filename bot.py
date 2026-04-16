@@ -189,21 +189,42 @@ def run() -> None:
         f"FUTURES {config.LEVERAGE}x ({config.MARGIN_TYPE})"
         if config.is_futures else "SPOT"
     )
+
+    # ── DRY RUN explanation box ───────────────────────────────────────────────
+    if config.DRY_RUN:
+        console.print(
+            Panel(
+                "[bold yellow]โหมด DRY RUN (จำลอง) — ไม่ใช้เงินจริง[/bold yellow]\n\n"
+                "บอทจะ [bold]แสดงผลเหมือนเทรดจริงทุกอย่าง[/bold] แต่ [bold red]ไม่ส่ง order ไป Binance[/bold red]\n"
+                "ใช้ดูก่อนว่า grid levels ถูกต้อง ราคาอยู่ในช่วงไหม บอททำงานปกติไหม\n\n"
+                "เมื่อมั่นใจแล้ว → เปลี่ยน [cyan]DRY_RUN=false[/cyan] ใน .env เพื่อเทรดจริง",
+                title="ℹ DRY_RUN คืออะไร?",
+                border_style="yellow",
+            )
+        )
+
     console.print(
         Panel.fit(
             "[bold green]Binance Grid Trading Bot[/bold green]\n\n"
             f"Symbol  : [cyan]{config.SYMBOL}[/cyan]   Market: [magenta]{market_label}[/magenta]\n"
             f"ช่วงราคา: ${config.LOWER_PRICE:,.0f} – ${config.UPPER_PRICE:,.0f}\n"
             f"Grid    : {config.GRID_COUNT} levels  (ห่างกัน ${config.grid_spacing:,.2f})\n"
-            f"ทุน/Grid: ${config.USDT_PER_GRID:.2f} USDT\n"
-            f"Mode    : {'[bold red]LIVE TRADING[/bold red]' if not config.DRY_RUN else '[bold yellow]DRY RUN — ไม่ส่ง order จริง[/bold yellow]'}",
+            f"Margin/Grid: ${config.USDT_PER_GRID:.2f} USDT"
+            + (f"  → Notional ${config.notional_per_grid:.2f} USDT ({config.LEVERAGE}x)" if config.is_futures else "") + "\n"
+            f"ทุนรวม  : ${config.total_margin_required:.2f} USDT\n"
+            f"Mode    : {'[bold red]LIVE TRADING[/bold red]' if not config.DRY_RUN else '[bold yellow]DRY RUN — จำลองเท่านั้น[/bold yellow]'}",
             title="เริ่มต้น",
             border_style="blue",
         )
     )
 
+    # ── Capital warnings ──────────────────────────────────────────────────────
+    for w in config.capital_warnings():
+        color = "red" if w.startswith("⚠") else "dim"
+        console.print(f"[{color}]{w}[/{color}]")
+
     if not config.DRY_RUN:
-        console.print("[bold red]⚠  LIVE MODE — จะส่ง order จริงใน 5 วินาที (Ctrl+C เพื่อยกเลิก)[/bold red]")
+        console.print("\n[bold red]⚠  LIVE MODE — จะส่ง order จริงใน 5 วินาที (Ctrl+C เพื่อยกเลิก)[/bold red]")
         time.sleep(5)
 
     # Setup futures (set leverage + margin type)
@@ -213,9 +234,16 @@ def run() -> None:
     current_price = binance.get_price()
     balance = binance.get_balance()
     console.print(
-        f"ราคาปัจจุบัน [cyan]{config.SYMBOL}[/cyan]: [bold green]${current_price:,.2f}[/bold green]   "
+        f"\nราคาปัจจุบัน [cyan]{config.SYMBOL}[/cyan]: [bold green]${current_price:,.2f}[/bold green]   "
         f"Balance: [bold]${balance:,.2f} USDT[/bold]"
     )
+
+    # ── Balance check ─────────────────────────────────────────────────────────
+    if not config.DRY_RUN and balance < config.total_margin_required:
+        console.print(
+            f"[bold red]⚠  Balance ${balance:.2f} ไม่พอ — ต้องการอย่างน้อย ${config.total_margin_required:.2f} USDT[/bold red]"
+        )
+        sys.exit(1)
 
     if not (config.LOWER_PRICE < current_price < config.UPPER_PRICE):
         console.print(
