@@ -124,19 +124,37 @@ def _header_panel(current_price: float, cycle: int, direction: GridDirection) ->
 
 def _stats_panel(engine: GridEngine, daily_target: float) -> Panel:
     s = engine.stats
+    cap = config.total_margin_required
     open_count = len(engine.open_orders())
-    p_color = "green" if s.realized_profit_usdt >= 0 else "red"
-    dp_color = "green" if s.daily_profit_usdt >= 0 else "red"
-    pct = (s.daily_profit_usdt / config.total_margin_required * 100) if config.total_margin_required else 0
-    bar_filled = min(int(pct / config.DAILY_PROFIT_TARGET_PCT * 10), 10)
-    bar = f"{'█' * bar_filled}{'░' * (10 - bar_filled)}"
+
+    # Daily P&L % (positive = profit, negative = loss)
+    day_pct = (s.daily_profit_usdt / cap * 100) if cap else 0
+    tot_pct = (s.realized_profit_usdt / cap * 100) if cap else 0
+
+    # Profit bar (0 → target%)
+    profit_filled = min(int(day_pct / config.DAILY_PROFIT_TARGET_PCT * 10), 10) if day_pct > 0 else 0
+    profit_bar = f"{'█' * profit_filled}{'░' * (10 - profit_filled)}"
+
+    # Loss bar (0 → max_loss%)
+    loss_pct = abs(min(day_pct, 0))
+    loss_filled = min(int(loss_pct / config.MAX_LOSS_PCT * 10), 10) if day_pct < 0 else 0
+    loss_bar = f"{'█' * loss_filled}{'░' * (10 - loss_filled)}"
+
+    day_color = "green" if day_pct >= 0 else "red"
+    tot_color = "green" if tot_pct >= 0 else "red"
+    sign = "+" if day_pct >= 0 else ""
+    tsign = "+" if tot_pct >= 0 else ""
+
     lines = [
-        f"Open orders   : {open_count}   Grid resets: {s.resets}",
-        f"BUY / SELL    : {s.total_buys_filled} / {s.total_sells_filled}",
-        f"Total P&L     : [bold {p_color}]${s.realized_profit_usdt:.4f} USDT[/bold {p_color}]",
-        f"วันนี้ P&L    : [bold {dp_color}]${s.daily_profit_usdt:.4f} USDT[/bold {dp_color}]  ({pct:.1f}%)",
-        f"เป้าวันนี้    : [{dp_color}]{bar}[/{dp_color}] ${daily_target:.2f}",
-        f"Runtime       : {s.runtime_hours:.2f}h",
+        f"Open orders  : {open_count}   Resets: {s.resets}",
+        f"BUY / SELL   : {s.total_buys_filled} / {s.total_sells_filled}",
+        f"วันนี้ P&L   : [bold {day_color}]{sign}{day_pct:.2f}%[/bold {day_color}]"
+        f"  ([{day_color}]{sign}${s.daily_profit_usdt:.4f}[/{day_color}])",
+        f"กำไร  [{day_color}]{profit_bar}[/{day_color}] {sign}{day_pct:.2f}% / +{config.DAILY_PROFIT_TARGET_PCT:.0f}%",
+        f"ขาดทุน [red]{loss_bar}[/red] -{loss_pct:.2f}% / -{config.MAX_LOSS_PCT:.0f}%",
+        f"Total P&L    : [bold {tot_color}]{tsign}{tot_pct:.2f}%[/bold {tot_color}]"
+        f"  ([{tot_color}]{tsign}${s.realized_profit_usdt:.4f}[/{tot_color}])",
+        f"Runtime      : {s.runtime_hours:.2f}h",
     ]
     return Panel("\n".join(lines), title="Stats", border_style="green")
 
@@ -324,7 +342,10 @@ def run() -> None:
         f"({config.GRID_COUNT} grids, ห่าง ${config.grid_spacing:.4f})\n"
         f"Margin/Grid: ${config.USDT_PER_GRID:.2f}"
         + (f"  → Notional ${config.notional_per_grid:.2f} USDT" if config.is_futures else "") + "\n"
-        f"เป้าวันนี้ : {config.DAILY_PROFIT_TARGET_PCT:.0f}%  = ${config.daily_profit_target_usdt:.2f} USDT\n"
+        f"เป้ากำไร  : [green]+{config.DAILY_PROFIT_TARGET_PCT:.0f}%[/green]"
+        f"  = +${config.daily_profit_target_usdt:.2f} USDT"
+        f"   ยอมขาดทุน: [red]-{config.MAX_LOSS_PCT:.0f}%[/red]"
+        f"  = -${config.daily_max_loss_usdt:.2f} USDT\n"
         f"Mode      : {'[bold red]LIVE[/bold red]' if not config.DRY_RUN else '[bold yellow]DRY RUN[/bold yellow]'}",
         title="Config", border_style="blue",
     ))
@@ -438,25 +459,26 @@ def run() -> None:
 
             # ── Daily profit target check ─────────────────────────────────────
             if engine.stats.daily_profit_usdt >= daily_target:
+                day_pct = engine.stats.daily_profit_usdt / config.total_margin_required * 100
                 console.print(
-                    f"\n[bold green]🎯 ถึงเป้าวันนี้! ${engine.stats.daily_profit_usdt:.4f} USDT "
-                    f"({engine.stats.daily_profit_usdt / config.total_margin_required * 100:.1f}%)[/bold green]"
+                    f"\n[bold green]🎯 ถึงเป้าวันนี้! +{day_pct:.2f}% "
+                    f"(+${engine.stats.daily_profit_usdt:.4f} USDT)[/bold green]"
                 )
                 console.print("[yellow]หยุดบอทสำหรับวันนี้ — รันใหม่พรุ่งนี้[/yellow]")
-                notifier.alert_profit_target(
-                    config.SYMBOL,
-                    engine.stats.daily_profit_usdt,
-                    engine.stats.daily_profit_usdt / config.total_margin_required * 100,
-                )
+                notifier.alert_profit_target(config.SYMBOL, engine.stats.daily_profit_usdt, day_pct)
                 break
 
-            # ── Loss limit check ──────────────────────────────────────────────
-            if engine.stats.realized_profit_usdt < -abs(config.MAX_LOSS_USDT):
-                console.print(f"[bold red]หยุดบอท: ขาดทุนเกิน ${config.MAX_LOSS_USDT:.2f} USDT[/bold red]")
+            # ── Daily loss limit check (symmetric with profit target) ─────────
+            if engine.stats.daily_profit_usdt < -config.daily_max_loss_usdt:
+                day_pct = engine.stats.daily_profit_usdt / config.total_margin_required * 100
+                console.print(
+                    f"[bold red]หยุดบอท: ขาดทุนวันนี้ {day_pct:.2f}% "
+                    f"(${engine.stats.daily_profit_usdt:.4f}) เกินลิมิต -{config.MAX_LOSS_PCT:.0f}%[/bold red]"
+                )
                 notifier.alert_max_loss(
                     config.SYMBOL,
-                    engine.stats.realized_profit_usdt,
-                    config.MAX_LOSS_USDT,
+                    engine.stats.daily_profit_usdt,
+                    config.daily_max_loss_usdt,
                 )
                 break
 
@@ -614,15 +636,21 @@ def run() -> None:
     binance.cancel_all_open_orders()
 
     s = engine.stats
-    p_color = "green" if s.realized_profit_usdt >= 0 else "red"
+    cap = config.total_margin_required
+    day_pct = s.daily_profit_usdt / cap * 100 if cap else 0
+    tot_pct = s.realized_profit_usdt / cap * 100 if cap else 0
+    p_color = "green" if tot_pct >= 0 else "red"
+    d_color = "green" if day_pct >= 0 else "red"
+    dsign = "+" if day_pct >= 0 else ""
+    tsign = "+" if tot_pct >= 0 else ""
     console.print(Panel(
         f"[bold]สรุปผล[/bold]\n\n"
         f"Market    : {market_label}\n"
         f"Timeframe : {config.TIMEFRAME}\n"
-        f"Cycles    : {cycle}   Grid resets: {s.resets}\n"
+        f"Cycles    : {cycle}   Resets: {s.resets}   Re-grids: {regrid_count}\n"
         f"BUY/SELL  : {s.total_buys_filled} / {s.total_sells_filled}\n"
-        f"วันนี้    : ${s.daily_profit_usdt:.4f} USDT\n"
-        f"รวมทั้งหมด: [bold {p_color}]${s.realized_profit_usdt:.4f} USDT[/bold {p_color}]\n"
+        f"วันนี้    : [{d_color}]{dsign}{day_pct:.2f}%  ({dsign}${s.daily_profit_usdt:.4f} USDT)[/{d_color}]\n"
+        f"รวมทั้งหมด: [bold {p_color}]{tsign}{tot_pct:.2f}%  ({tsign}${s.realized_profit_usdt:.4f} USDT)[/bold {p_color}]\n"
         f"Runtime   : {s.runtime_hours:.2f}h",
         title="จบการทำงาน", border_style="yellow",
     ))

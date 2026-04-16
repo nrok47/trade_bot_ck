@@ -27,7 +27,7 @@ class Config:
 
     # ── Trend-following settings ───────────────────────────────────────────────
     # Timeframe สำหรับอ่าน candle: 1m, 3m, 5m, 15m, 30m
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "5m")
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "3m")
 
     # EMA periods
     EMA_SHORT: int = int(os.getenv("EMA_SHORT", "9"))
@@ -44,12 +44,12 @@ class Config:
     # ── Whipsaw Protection ────────────────────────────────────────────────────
     # จำนวน candle ที่ต้องเห็น signal เดิมติดต่อกัน ก่อนจะยอม reset grid
     # ยิ่งสูง = นิ่งขึ้น (reset น้อยลง) แต่ตอบสนองช้าลง
-    # แนะนำ: TF 5m → 2-3 bars,  TF 15m → 2 bars
-    TREND_CONFIRM_BARS: int = int(os.getenv("TREND_CONFIRM_BARS", "2"))
+    # แนะนำ: TF 3m → 3 bars (9 min),  TF 5m → 2-3 bars,  TF 15m → 2 bars
+    TREND_CONFIRM_BARS: int = int(os.getenv("TREND_CONFIRM_BARS", "3"))
 
     # รอขั้นต่ำกี่วินาทีก่อน reset grid อีกครั้ง (ป้องกัน reset ถี่เกินไป)
-    # แนะนำ: ≥ 1 เท่าของ TF (เช่น 5m → MIN_RESET_INTERVAL=300)
-    MIN_RESET_INTERVAL_SECONDS: float = float(os.getenv("MIN_RESET_INTERVAL_SECONDS", "300"))
+    # แนะนำ: ≥ 1 candle  → 3m=180, 5m=300, 15m=900
+    MIN_RESET_INTERVAL_SECONDS: float = float(os.getenv("MIN_RESET_INTERVAL_SECONDS", "180"))
 
     # ── Auto Re-grid (re-center เมื่อราคาเลื่อนออกจากศูนย์กลาง) ──────────────
     # AUTO_REGRID=true → re-center grid เมื่อราคาเคลื่อนเข้าโซนขอบ (top/bottom threshold%)
@@ -78,7 +78,7 @@ class Config:
     BB_STD: float = float(os.getenv("BB_STD", "2.0"))
 
     # Lookback settings (ใช้เมื่อ RANGE_STRATEGY=lookback)
-    LOOKBACK_BARS: int = int(os.getenv("LOOKBACK_BARS", "96"))  # 96×15m = 24h
+    LOOKBACK_BARS: int = int(os.getenv("LOOKBACK_BARS", "480"))  # 480×3m = 24h  (96×15m = 24h)
     BUFFER_PCT: float = float(os.getenv("BUFFER_PCT", "0.05"))  # 5% buffer
 
     # ── Boundary Alert & Auto-Stop ────────────────────────────────────────────
@@ -94,11 +94,12 @@ class Config:
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
     # ── Profit targets & safety ────────────────────────────────────────────────
-    # เป้ากำไรต่อวัน (% ของทุนทั้งหมด) — หยุดบอทเมื่อถึง
+    # เป้ากำไรต่อวัน (% ของทุน) — หยุดบอทเมื่อถึง
     DAILY_PROFIT_TARGET_PCT: float = float(os.getenv("DAILY_PROFIT_TARGET_PCT", "33"))
 
-    # หยุดถ้าขาดทุนเกินนี้ (USDT)
-    MAX_LOSS_USDT: float = float(os.getenv("MAX_LOSS_USDT", "20.0"))
+    # ยอมขาดทุนต่อวันได้กี่ % ของทุน — ควรตั้งเท่ากับ DAILY_PROFIT_TARGET_PCT
+    # เช่น ทุน $20, ทั้งคู่ 33% → กำไรเป้า $6.60  ขาดทุนสูงสุด $6.60
+    MAX_LOSS_PCT: float = float(os.getenv("MAX_LOSS_PCT", "33"))
 
     # DRY_RUN=true = จำลองเท่านั้น ไม่ส่ง order จริง
     DRY_RUN: bool = os.getenv("DRY_RUN", "true").lower() != "false"
@@ -128,6 +129,11 @@ class Config:
     def daily_profit_target_usdt(self) -> float:
         """USDT กำไรที่ต้องการต่อวัน (คำนวณจาก % ของทุน)."""
         return self.total_margin_required * self.DAILY_PROFIT_TARGET_PCT / 100
+
+    @property
+    def daily_max_loss_usdt(self) -> float:
+        """USDT ขาดทุนสูงสุดต่อวัน (สมมาตรกับ daily_profit_target_usdt)."""
+        return self.total_margin_required * self.MAX_LOSS_PCT / 100
 
     # ── Validation ────────────────────────────────────────────────────────────
 
@@ -185,8 +191,12 @@ class Config:
                     "ราคาเคลื่อนที่ 10% อาจโดน Liquidate"
                 )
         warnings.append(
-            f"เป้ากำไร/วัน: {self.DAILY_PROFIT_TARGET_PCT:.0f}%  "
-            f"= ${self.daily_profit_target_usdt:.2f} USDT"
+            f"เป้ากำไร/วัน : +{self.DAILY_PROFIT_TARGET_PCT:.0f}%"
+            f"  = +${self.daily_profit_target_usdt:.2f} USDT"
+        )
+        warnings.append(
+            f"ยอมขาดทุน/วัน: -{self.MAX_LOSS_PCT:.0f}%"
+            f"  = -${self.daily_max_loss_usdt:.2f} USDT"
         )
         return warnings
 
