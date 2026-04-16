@@ -51,6 +51,16 @@ class Config:
     # แนะนำ: ≥ 1 เท่าของ TF (เช่น 5m → MIN_RESET_INTERVAL=300)
     MIN_RESET_INTERVAL_SECONDS: float = float(os.getenv("MIN_RESET_INTERVAL_SECONDS", "300"))
 
+    # ── Auto Re-grid (re-center เมื่อราคาเลื่อนออกจากศูนย์กลาง) ──────────────
+    # AUTO_REGRID=true → re-center grid เมื่อราคาเคลื่อนเข้าโซนขอบ (top/bottom threshold%)
+    #   ปิดโดย default — เปิดเฉพาะเมื่อเข้าใจความเสี่ยงแล้ว
+    AUTO_REGRID: bool = os.getenv("AUTO_REGRID", "false").lower() == "true"
+
+    # เปอร์เซ็นต์โซนขอบที่ trigger re-grid (0.0–0.5)
+    # 0.25 = trigger เมื่อราคาอยู่ใน top/bottom 25% ของกรอบ
+    # ต่ำกว่า = re-grid บ่อยกว่า  สูงกว่า = รอนานกว่า (แนะนำ 0.20–0.30)
+    REGRID_THRESHOLD: float = float(os.getenv("REGRID_THRESHOLD", "0.25"))
+
     # ── Dynamic Range (ATR-based auto initialization) ─────────────────────────
     # AUTO_RANGE=true → คำนวณ Upper/Lower จาก ATR อัตโนมัติตอนเริ่มบอท
     #                    (ไม่ต้องตั้ง UPPER_PRICE / LOWER_PRICE เอง)

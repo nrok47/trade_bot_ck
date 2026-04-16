@@ -192,17 +192,32 @@ def _grid_table(engine: GridEngine, current_price: float) -> Table:
     return table
 
 
-def _range_panel(grid_range: GridRange, current_price: float, alert_pct: float, stop_pct: float) -> Panel:
+def _range_panel(grid_range: GridRange, current_price: float, alert_pct: float,
+                  stop_pct: float, regrid_count: int = 0) -> Panel:
     status = check_boundary(current_price, grid_range, alert_pct, stop_pct)
     upper_bar = min(int((1 - status.upper_dist_pct / alert_pct) * 5), 5) if status.upper_dist_pct >= 0 else 5
     lower_bar = min(int((1 - status.lower_dist_pct / alert_pct) * 5), 5) if status.lower_dist_pct >= 0 else 5
     upper_color = "red" if status.breached_upper else ("yellow" if status.near_upper else "green")
     lower_color = "red" if status.breached_lower else ("yellow" if status.near_lower else "green")
+
+    # Position bar: แสดงตำแหน่งราคาในกรอบ 0%=lower … 100%=upper
+    width = grid_range.upper - grid_range.lower
+    pos_pct = (current_price - grid_range.lower) / width * 100 if width > 0 else 50
+    pos_pct = max(0.0, min(100.0, pos_pct))
+    pos_filled = int(pos_pct / 10)
+    pos_bar = "░" * pos_filled + "▓" + "░" * (9 - pos_filled)
+    regrid_zone = int(config.REGRID_THRESHOLD * 10) if config.AUTO_REGRID else -1
+    pos_color = "yellow" if config.AUTO_REGRID and (pos_filled >= (10 - regrid_zone) or pos_filled < regrid_zone) else "cyan"
+
     lines = [
         f"Strategy  : [cyan]{grid_range.strategy_used}[/cyan]"
-        + (f"   ATR={grid_range.atr_value:.4f}" if grid_range.atr_value else ""),
+        + (f"   ATR={grid_range.atr_value:.4f}" if grid_range.atr_value else "")
+        + (f"   Re-grids: {regrid_count}" if regrid_count else ""),
         f"Upper     : [bold {upper_color}]${grid_range.upper:,.4f}[/bold {upper_color}]"
         f"  ห่าง {'█' * upper_bar}{'░' * (5 - upper_bar)} {status.upper_dist_pct:.2f}%",
+        f"ตำแหน่ง  : [{pos_color}]{pos_bar}[/{pos_color}] {pos_pct:.0f}%"
+        + (f"  [dim](re-grid zone <{regrid_zone*10}% / >{(10-regrid_zone)*10}%)[/dim]"
+           if config.AUTO_REGRID else ""),
         f"Lower     : [bold {lower_color}]${grid_range.lower:,.4f}[/bold {lower_color}]"
         f"  ห่าง {'█' * lower_bar}{'░' * (5 - lower_bar)} {status.lower_dist_pct:.2f}%",
         f"แจ้งเตือน : <{alert_pct:.0f}% จากขอบ   หยุดบอท : >{stop_pct:.0f}% หลุดกรอบ",
@@ -224,6 +239,57 @@ def _recent_fills_panel(engine: GridEngine) -> Panel:
         ts = time.strftime("%H:%M:%S", time.localtime(o.filled_at)) if o.filled_at else "–"
         lines.append(f"{ts}  {side_str} @ ${o.price:>8,.4f}  qty={o.qty:.6f}")
     return Panel("\n".join(lines), title="Recent Fills", border_style="magenta")
+
+
+# ── Auto Re-grid helpers ──────────────────────────────────────────────────────
+
+def _needs_regrid(current_price: float, grid_range: GridRange, threshold: float) -> tuple[bool, str]:
+    """
+    คืน (should_regrid, side) เมื่อราคาเข้าโซนขอบ top/bottom threshold%
+    side = "upper" | "lower" | "none"
+    """
+    width = grid_range.upper - grid_range.lower
+    if width <= 0:
+        return False, "none"
+    pos = (current_price - grid_range.lower) / width   # 0.0 = at lower, 1.0 = at upper
+    if pos >= (1.0 - threshold):
+        return True, "upper"
+    if pos <= threshold:
+        return True, "lower"
+    return False, "none"
+
+
+def _compute_new_range(current_price: float, old_range: GridRange) -> GridRange:
+    """
+    คำนวณกรอบใหม่ centered บนราคาปัจจุบัน
+    - AUTO_RANGE=true  → ใช้ ATR/BB/Lookback คำนวณใหม่
+    - AUTO_RANGE=false → เลื่อนกรอบเดิม (ความกว้างเท่าเดิม) มา center ที่ราคาใหม่
+    """
+    if config.AUTO_RANGE and config.RANGE_STRATEGY != "manual":
+        try:
+            candles = binance.get_klines(config.SYMBOL, config.TIMEFRAME, limit=200)
+            return calculate_range(
+                candles, current_price,
+                strategy=config.RANGE_STRATEGY,
+                atr_period=config.ATR_PERIOD,
+                atr_multiplier=config.ATR_MULTIPLIER,
+                bb_period=config.BB_PERIOD,
+                bb_std=config.BB_STD,
+                lookback_bars=config.LOOKBACK_BARS,
+                buffer_pct=config.BUFFER_PCT,
+            )
+        except Exception as exc:
+            logger.warning("Re-grid ATR calc failed: %s — shifting width instead", exc)
+
+    # Fallback: shift same width to center on current price
+    half = (old_range.upper - old_range.lower) / 2
+    return GridRange(
+        upper=round(current_price + half, 6),
+        lower=round(current_price - half, 6),
+        strategy_used=f"Shifted({old_range.strategy_used})",
+        atr_value=old_range.atr_value,
+        note="Same width, recentered",
+    )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -352,6 +418,7 @@ def run() -> None:
 
     daily_target = config.daily_profit_target_usdt
     cycle = 0
+    regrid_count = 0
     futures_info = None
     last_midnight = time.strftime("%Y-%m-%d")
     _last_alert_upper = False
@@ -433,6 +500,35 @@ def run() -> None:
             _last_alert_upper = boundary.near_upper
             _last_alert_lower = boundary.near_lower
 
+            # ── Auto Re-grid (re-center เมื่อราคาเลื่อนออกจากศูนย์กลาง) ─────
+            if config.AUTO_REGRID and engine._initialized:
+                needs_rg, rg_side = _needs_regrid(
+                    current_price, grid_range, config.REGRID_THRESHOLD
+                )
+                if needs_rg and strategy.can_reset_now():
+                    new_range = _compute_new_range(current_price, grid_range)
+                    logger.info(
+                        "Auto Re-grid: ราคา %.4f อยู่โซน %s → กรอบใหม่ %.4f–%.4f",
+                        current_price, rg_side, new_range.lower, new_range.upper,
+                    )
+                    engine.reset()
+                    strategy.mark_reset()
+                    config.UPPER_PRICE = new_range.upper
+                    config.LOWER_PRICE = new_range.lower
+                    engine.levels = engine._compute_levels()
+                    grid_range = new_range
+                    engine.initialize(current_price, current_direction)
+                    regrid_count += 1
+                    console.print(
+                        f"[cyan]Re-grid #{regrid_count}: ${new_range.lower:.4f} – "
+                        f"${new_range.upper:.4f}  ({new_range.strategy_used})[/cyan]"
+                    )
+                    notifier.alert_range_calculated(
+                        config.SYMBOL,
+                        f"Re-grid #{regrid_count} ({new_range.strategy_used})",
+                        new_range.upper, new_range.lower, new_range.atr_value,
+                    )
+
             # ── Re-analyze trend (with whipsaw protection) ───────────────────
             sig = strategy.analyze()
             new_direction = _signal_to_direction(sig)
@@ -465,6 +561,7 @@ def run() -> None:
             range_panel = _range_panel(
                 grid_range, current_price,
                 config.PRICE_ALERT_PCT, config.AUTO_STOP_PCT,
+                regrid_count,
             )
             layout = Layout()
             if config.is_futures:
