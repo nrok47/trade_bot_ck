@@ -9,6 +9,9 @@ class Config:
     API_KEY: str = os.getenv("BINANCE_API_KEY", "")
     API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 
+    # Market type: "spot" or "futures"
+    MARKET: str = os.getenv("MARKET", "spot").lower()
+
     # Grid parameters
     SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT")
     UPPER_PRICE: float = float(os.getenv("UPPER_PRICE", "100000"))
@@ -16,18 +19,33 @@ class Config:
     GRID_COUNT: int = int(os.getenv("GRID_COUNT", "10"))
     USDT_PER_GRID: float = float(os.getenv("USDT_PER_GRID", "10.0"))
 
+    # Futures-only settings
+    LEVERAGE: int = int(os.getenv("LEVERAGE", "1"))
+    MARGIN_TYPE: str = os.getenv("MARGIN_TYPE", "ISOLATED")   # ISOLATED | CROSSED
+
     # Safety
     DRY_RUN: bool = os.getenv("DRY_RUN", "true").lower() != "false"
     MAX_LOSS_USDT: float = float(os.getenv("MAX_LOSS_USDT", "50.0"))
     POLL_INTERVAL_SECONDS: float = float(os.getenv("POLL_INTERVAL_SECONDS", "5"))
 
+    @property
+    def is_futures(self) -> bool:
+        return self.MARKET == "futures"
+
     def validate(self) -> None:
+        if self.MARKET not in ("spot", "futures"):
+            raise ValueError("MARKET must be 'spot' or 'futures'")
         if self.UPPER_PRICE <= self.LOWER_PRICE:
             raise ValueError("UPPER_PRICE must be greater than LOWER_PRICE")
         if self.GRID_COUNT < 2:
             raise ValueError("GRID_COUNT must be at least 2")
         if self.USDT_PER_GRID <= 0:
             raise ValueError("USDT_PER_GRID must be positive")
+        if self.is_futures:
+            if not 1 <= self.LEVERAGE <= 125:
+                raise ValueError("LEVERAGE must be between 1 and 125")
+            if self.MARGIN_TYPE not in ("ISOLATED", "CROSSED"):
+                raise ValueError("MARGIN_TYPE must be ISOLATED or CROSSED")
         if not self.DRY_RUN:
             if not self.API_KEY or not self.API_SECRET:
                 raise EnvironmentError(
@@ -40,8 +58,8 @@ class Config:
 
     @property
     def total_usdt_required(self) -> float:
-        """Rough estimate: buy orders on all levels below current price."""
-        return self.USDT_PER_GRID * self.GRID_COUNT
+        base = self.USDT_PER_GRID * self.GRID_COUNT
+        return base / self.LEVERAGE if self.is_futures else base
 
 
 config = Config()

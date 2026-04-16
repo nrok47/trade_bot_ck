@@ -1,18 +1,18 @@
 """
 Binance Grid Trading Bot
 ========================
+รองรับทั้ง Spot และ Futures (USDT-M) — เลือกผ่าน MARKET ใน .env
+
 กลยุทธ์ Grid Trading:
-  - แบ่งช่วงราคาเป็น N ระดับ (grid lines)
-  - วาง limit BUY ใต้ราคาปัจจุบัน, limit SELL เหนือราคาปัจจุบัน
-  - เมื่อ BUY เต็ม → วาง SELL สูงขึ้น 1 grid (lock กำไร)
-  - เมื่อ SELL เต็ม → วาง BUY ต่ำลง 1 grid (วนใหม่)
-  - กำไรต่อรอบ ≈ grid_spacing × qty
+  - แบ่งช่วงราคาเป็น N ระดับ
+  - วาง BUY ใต้ราคาปัจจุบัน, SELL เหนือราคาปัจจุบัน
+  - BUY เต็ม → วาง SELL สูงขึ้น 1 grid (lock กำไร)
+  - SELL เต็ม → วาง BUY ต่ำลง 1 grid (วนใหม่)
 
 Usage:
-  1. cp .env.example .env  แล้วกรอก API key
-  2. ตั้งค่าช่วงราคาใน .env ให้ตรงกับราคาตลาดปัจจุบัน
-  3. python bot.py          (DRY_RUN=true โดย default)
-  4. ตรวจสอบผลลัพธ์ก่อน แล้วค่อยตั้ง DRY_RUN=false
+  1. cp .env.example .env
+  2. กรอก API key + ตั้งค่า MARKET=spot หรือ futures
+  3. python bot.py   (DRY_RUN=true โดย default)
 """
 from __future__ import annotations
 
@@ -26,11 +26,10 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from rich import box
 
 from config import config
-from binance_client import binance
+from binance_client import binance, FuturesInfo
 from grid import GridEngine, OrderSide
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -63,10 +62,15 @@ signal.signal(signal.SIGTERM, _handle_signal)
 # ── Dashboard builders ────────────────────────────────────────────────────────
 
 def _header_panel(current_price: float, cycle: int) -> Panel:
-    mode = "[bold red]LIVE[/bold red]" if not config.DRY_RUN else "[bold yellow]DRY RUN[/bold yellow]"
+    mode_str = "[bold red]LIVE[/bold red]" if not config.DRY_RUN else "[bold yellow]DRY RUN[/bold yellow]"
+    market_str = (
+        f"[magenta]FUTURES {config.LEVERAGE}x ({config.MARGIN_TYPE})[/magenta]"
+        if config.is_futures else "[cyan]SPOT[/cyan]"
+    )
     content = (
-        f"Mode: {mode}   Symbol: [cyan]{config.SYMBOL}[/cyan]   "
-        f"ราคาปัจจุบัน: [bold green]${current_price:,.2f}[/bold green]   "
+        f"Mode: {mode_str}   Market: {market_str}   "
+        f"Symbol: [bold]{config.SYMBOL}[/bold]   "
+        f"ราคา: [bold green]${current_price:,.2f}[/bold green]   "
         f"Cycle: {cycle}"
     )
     return Panel(content, title="[bold]Binance Grid Bot[/bold]", border_style="blue")
@@ -75,10 +79,12 @@ def _header_panel(current_price: float, cycle: int) -> Panel:
 def _config_panel() -> Panel:
     lines = [
         f"ช่วงราคา   : ${config.LOWER_PRICE:,.0f} – ${config.UPPER_PRICE:,.0f}",
-        f"จำนวน Grid : {config.GRID_COUNT} levels  (ห่างกัน ${config.grid_spacing:,.2f})",
-        f"USDT/Grid  : ${config.USDT_PER_GRID:.2f}",
-        f"ทุนรวม     : ~${config.total_usdt_required:.2f} USDT",
+        f"Grid spacing: ${config.grid_spacing:,.2f}  ({config.GRID_COUNT} levels)",
+        f"USDT/Grid   : ${config.USDT_PER_GRID:.2f}",
+        f"ทุนรวม (est): ~${config.total_usdt_required:.2f} USDT",
     ]
+    if config.is_futures:
+        lines.append(f"Leverage    : [magenta]{config.LEVERAGE}x[/magenta]  → notional/grid ${config.USDT_PER_GRID * config.LEVERAGE:.2f}")
     return Panel("\n".join(lines), title="Config", border_style="dim")
 
 
@@ -87,24 +93,40 @@ def _stats_panel(engine: GridEngine) -> Panel:
     open_count = len(engine.open_orders())
     profit_color = "green" if s.realized_profit_usdt >= 0 else "red"
     lines = [
-        f"Open orders   : {open_count}",
-        f"BUY  filled   : {s.total_buys_filled}",
-        f"SELL filled   : {s.total_sells_filled}",
-        f"Realized P&L  : [bold {profit_color}]${s.realized_profit_usdt:.4f} USDT[/bold {profit_color}]",
-        f"Runtime       : {s.runtime_hours:.2f} ชั่วโมง",
+        f"Open orders : {open_count}",
+        f"BUY filled  : {s.total_buys_filled}",
+        f"SELL filled : {s.total_sells_filled}",
+        f"Realized P&L: [bold {profit_color}]${s.realized_profit_usdt:.4f} USDT[/bold {profit_color}]",
+        f"Runtime     : {s.runtime_hours:.2f} ชั่วโมง",
     ]
     return Panel("\n".join(lines), title="Stats", border_style="green")
+
+
+def _futures_panel(fi: FuturesInfo) -> Panel:
+    pnl_color = "green" if fi.unrealized_pnl >= 0 else "red"
+    liq_str = (
+        f"[bold red]${fi.liquidation_price:,.2f}[/bold red]"
+        if fi.liquidation_price > 0 else "[dim]ไม่มี[/dim]"
+    )
+    funding_color = "red" if fi.funding_rate > 0 else "green"
+    lines = [
+        f"Leverage      : [magenta]{fi.leverage}x[/magenta]  ({fi.margin_type})",
+        f"Position size : {fi.position_size:.6f}",
+        f"Unrealized P&L: [bold {pnl_color}]${fi.unrealized_pnl:.4f}[/bold {pnl_color}]",
+        f"Liquidation   : {liq_str}",
+        f"Funding rate  : [{funding_color}]{fi.funding_rate*100:.4f}%[/{funding_color}] / 8h",
+    ]
+    return Panel("\n".join(lines), title="[magenta]Futures Info[/magenta]", border_style="magenta")
 
 
 def _grid_table(engine: GridEngine, current_price: float) -> Table:
     table = Table(box=box.SIMPLE_HEAVY, show_header=True, header_style="bold cyan")
     table.add_column("Level", justify="center", style="dim", width=6)
-    table.add_column("ราคา (USDT)", justify="right", width=14)
+    table.add_column("ราคา (USDT)", justify="right", width=15)
     table.add_column("ด้าน", justify="center", width=6)
     table.add_column("สถานะ", justify="center", width=12)
     table.add_column("qty", justify="right", width=12)
 
-    # Build a lookup: price → GridOrder (latest)
     price_to_order: dict[float, object] = {}
     for o in engine.orders.values():
         price_to_order[o.price] = o
@@ -113,14 +135,15 @@ def _grid_table(engine: GridEngine, current_price: float) -> Table:
         level_idx = len(engine.levels) - 1 - i
         order = price_to_order.get(price)
 
-        # Highlight current price band
-        if price <= current_price < (engine.levels[level_idx + 1] if level_idx + 1 < len(engine.levels) else price + 1):
-            price_str = f"[bold green]▶ {price:>12,.2f}[/bold green]"
-        else:
-            price_str = f"{price:>12,.2f}"
+        next_price = engine.levels[level_idx + 1] if level_idx + 1 < len(engine.levels) else price + 1
+        in_band = price <= current_price < next_price
+        price_str = (
+            f"[bold green]▶ {price:>12,.2f}[/bold green]"
+            if in_band else f"{price:>12,.2f}"
+        )
 
         if order is None:
-            table.add_row(str(level_idx), price_str, "–", "[dim]ไม่มี order[/dim]", "–")
+            table.add_row(str(level_idx), price_str, "–", "[dim]–[/dim]", "–")
         else:
             side_str = "[green]BUY[/green]" if order.side == OrderSide.BUY else "[red]SELL[/red]"
             if order.status == "FILLED":
@@ -156,18 +179,20 @@ def _recent_fills_panel(engine: GridEngine) -> Panel:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run() -> None:
-    # Validate config
     try:
         config.validate()
     except (ValueError, EnvironmentError) as exc:
         console.print(f"[bold red]Config error: {exc}[/bold red]")
         sys.exit(1)
 
-    # Print startup banner
+    market_label = (
+        f"FUTURES {config.LEVERAGE}x ({config.MARGIN_TYPE})"
+        if config.is_futures else "SPOT"
+    )
     console.print(
         Panel.fit(
             "[bold green]Binance Grid Trading Bot[/bold green]\n\n"
-            f"Symbol  : [cyan]{config.SYMBOL}[/cyan]\n"
+            f"Symbol  : [cyan]{config.SYMBOL}[/cyan]   Market: [magenta]{market_label}[/magenta]\n"
             f"ช่วงราคา: ${config.LOWER_PRICE:,.0f} – ${config.UPPER_PRICE:,.0f}\n"
             f"Grid    : {config.GRID_COUNT} levels  (ห่างกัน ${config.grid_spacing:,.2f})\n"
             f"ทุน/Grid: ${config.USDT_PER_GRID:.2f} USDT\n"
@@ -181,71 +206,98 @@ def run() -> None:
         console.print("[bold red]⚠  LIVE MODE — จะส่ง order จริงใน 5 วินาที (Ctrl+C เพื่อยกเลิก)[/bold red]")
         time.sleep(5)
 
-    # Check current price fits within grid
+    # Setup futures (set leverage + margin type)
+    if config.is_futures:
+        binance.setup_futures()
+
     current_price = binance.get_price()
-    console.print(f"ราคาปัจจุบัน [cyan]{config.SYMBOL}[/cyan]: [bold green]${current_price:,.2f}[/bold green]")
+    balance = binance.get_balance()
+    console.print(
+        f"ราคาปัจจุบัน [cyan]{config.SYMBOL}[/cyan]: [bold green]${current_price:,.2f}[/bold green]   "
+        f"Balance: [bold]${balance:,.2f} USDT[/bold]"
+    )
 
     if not (config.LOWER_PRICE < current_price < config.UPPER_PRICE):
         console.print(
-            f"[bold red]⚠  ราคาปัจจุบัน ${current_price:,.2f} อยู่นอกช่วง Grid "
+            f"[bold red]⚠  ราคา ${current_price:,.2f} อยู่นอกช่วง Grid "
             f"(${config.LOWER_PRICE:,.0f}–${config.UPPER_PRICE:,.0f})[/bold red]\n"
-            "[yellow]กรุณาปรับ LOWER_PRICE / UPPER_PRICE ใน .env ให้ครอบคลุมราคาปัจจุบัน[/yellow]"
+            "[yellow]กรุณาปรับ LOWER_PRICE / UPPER_PRICE ใน .env[/yellow]"
         )
         sys.exit(1)
 
-    # Initialize grid
     engine = GridEngine()
     engine.initialize(current_price)
 
     cycle = 0
+    futures_info = None
+
     with Live(console=console, refresh_per_second=1, screen=False) as live:
         while _running:
             cycle += 1
             current_price = binance.get_price()
 
-            # Safety: stop if loss exceeds limit
             if engine.stats.realized_profit_usdt < -abs(config.MAX_LOSS_USDT):
-                console.print(
-                    f"[bold red]หยุดบอท: ขาดทุนเกิน ${config.MAX_LOSS_USDT:.2f} USDT[/bold red]"
-                )
+                console.print(f"[bold red]หยุดบอท: ขาดทุนเกิน ${config.MAX_LOSS_USDT:.2f} USDT[/bold red]")
                 break
 
-            # Poll order fills and react
             newly_filled = engine.poll()
-            if newly_filled:
-                for o in newly_filled:
-                    logger.info("Filled: %s @ %.2f", o.side.value, o.price)
+            for o in newly_filled:
+                logger.info("Filled: %s @ %.2f", o.side.value, o.price)
 
-            # Build dashboard
+            if config.is_futures:
+                futures_info = binance.get_futures_info()
+
+            # Build layout
             layout = Layout()
-            layout.split_column(
-                Layout(_header_panel(current_price, cycle), size=3),
-                Layout(name="middle", size=8),
-                Layout(_grid_table(engine, current_price), name="grid"),
-                Layout(_recent_fills_panel(engine), size=12),
-            )
-            layout["middle"].split_row(
-                Layout(_config_panel()),
-                Layout(_stats_panel(engine)),
-            )
+            if config.is_futures:
+                layout.split_column(
+                    Layout(_header_panel(current_price, cycle), size=3),
+                    Layout(name="middle", size=8),
+                    Layout(name="middle2", size=8),
+                    Layout(_grid_table(engine, current_price), name="grid"),
+                    Layout(_recent_fills_panel(engine), size=12),
+                )
+                layout["middle"].split_row(
+                    Layout(_config_panel()),
+                    Layout(_stats_panel(engine)),
+                )
+                layout["middle2"].split_row(
+                    Layout(_futures_panel(futures_info)),
+                    Layout(Panel(
+                        "[yellow]⚠  Futures มีความเสี่ยงสูง\n"
+                        "ระวัง Liquidation และ Funding Rate\n"
+                        "แนะนำ Leverage ≤ 3x สำหรับ Grid Bot[/yellow]",
+                        title="คำเตือน", border_style="yellow"
+                    )),
+                )
+            else:
+                layout.split_column(
+                    Layout(_header_panel(current_price, cycle), size=3),
+                    Layout(name="middle", size=8),
+                    Layout(_grid_table(engine, current_price), name="grid"),
+                    Layout(_recent_fills_panel(engine), size=12),
+                )
+                layout["middle"].split_row(
+                    Layout(_config_panel()),
+                    Layout(_stats_panel(engine)),
+                )
+
             live.update(layout)
 
-            # Sleep until next poll
             for _ in range(int(config.POLL_INTERVAL_SECONDS)):
                 if not _running:
                     break
                 time.sleep(1)
 
-    # Shutdown: cancel all open orders
     console.print("[yellow]กำลังยกเลิก open orders ทั้งหมด...[/yellow]")
     binance.cancel_all_open_orders()
 
-    # Final summary
     s = engine.stats
     profit_color = "green" if s.realized_profit_usdt >= 0 else "red"
     console.print(
         Panel(
             f"[bold]สรุปผลการทำงาน[/bold]\n\n"
+            f"Market       : {market_label}\n"
             f"Cycles       : {cycle}\n"
             f"BUY filled   : {s.total_buys_filled}\n"
             f"SELL filled  : {s.total_sells_filled}\n"
