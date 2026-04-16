@@ -446,7 +446,7 @@ def run() -> None:
     _last_alert_upper = False
     _last_alert_lower = False
 
-    with Live(console=console, refresh_per_second=1, screen=True) as live:
+    with Live(console=console, refresh_per_second=0.5, screen=True) as live:
         while _running:
             cycle += 1
             current_price = binance.get_price()
