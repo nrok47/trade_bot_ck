@@ -13,6 +13,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 from config import config
+from indicators import CandleData
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +286,35 @@ class BinanceClient:
         except BinanceAPIException as exc:
             logger.error("cancel_order(%s) error: %s", order_id, exc)
             return False
+
+    # ── Klines (candles) ──────────────────────────────────────────────────────
+
+    def get_klines(
+        self, symbol: str, interval: str, limit: int = 50
+    ) -> Optional[CandleData]:
+        """
+        ดึง candle data จาก Binance (ใช้ได้ทั้ง Spot และ Futures)
+        interval: "1m", "3m", "5m", "15m", "30m" ฯลฯ
+        """
+        try:
+            if config.is_futures:
+                raw = self._client.futures_klines(
+                    symbol=symbol, interval=interval, limit=limit
+                )
+            else:
+                raw = self._client.get_klines(
+                    symbol=symbol, interval=interval, limit=limit
+                )
+            # raw[i] = [open_time, open, high, low, close, volume, ...]
+            opens   = [float(k[1]) for k in raw]
+            highs   = [float(k[2]) for k in raw]
+            lows    = [float(k[3]) for k in raw]
+            closes  = [float(k[4]) for k in raw]
+            volumes = [float(k[5]) for k in raw]
+            return CandleData(opens, highs, lows, closes, volumes)
+        except BinanceAPIException as exc:
+            logger.error("get_klines error: %s", exc)
+            return None
 
     def cancel_all_open_orders(self) -> None:
         if config.DRY_RUN:
