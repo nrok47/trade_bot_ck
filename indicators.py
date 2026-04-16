@@ -2,7 +2,11 @@
 Technical indicators — คำนวณจาก Binance Kline data
 
 ตัวชี้วัดที่ใช้:
-  EMA   — Exponential Moving Average (ทิศทาง trend)
+  EMA          — Exponential Moving Average (ทิศทาง trend)
+  RSI          — Relative Strength Index (momentum)
+  Bull/Bear    — Elder's Bull & Bear Power
+  ATR          — Average True Range (ความผันผวน → ใช้กำหนดกรอบ grid)
+  Bollinger    — Bollinger Bands (upper/middle/lower)
   RSI   — Relative Strength Index (momentum, overbought/oversold)
   Bull/Bear Power (Elder) — วัดพลังของ buyer vs seller ในแต่ละ candle
     Bull Power = High - EMA  → บวก = bull ควบคุม
@@ -190,3 +194,89 @@ def analyze_trend(
         bear_power=bear_p,
         strength=strength,
     )
+
+
+# ── ATR (Average True Range) ──────────────────────────────────────────────────
+
+def atr(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 14,
+) -> float:
+    """
+    ATR ค่าสุดท้าย — วัดความผันผวนเฉลี่ย
+    True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|)
+    ยิ่งสูง = ราคาวิ่งแรง, ยิ่งต่ำ = ตลาดนิ่ง
+    """
+    if len(closes) < period + 1:
+        return highs[-1] - lows[-1]
+
+    trs = []
+    for i in range(1, len(closes)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        trs.append(tr)
+
+    # Wilder smoothing (เหมือน EMA แต่ k=1/period)
+    atr_val = sum(trs[:period]) / period
+    for tr in trs[period:]:
+        atr_val = (atr_val * (period - 1) + tr) / period
+
+    return atr_val
+
+
+# ── Bollinger Bands ───────────────────────────────────────────────────────────
+
+from dataclasses import dataclass as _dc
+import math as _math
+
+
+@_dc
+class BollingerBands:
+    upper: float
+    middle: float   # SMA
+    lower: float
+    bandwidth: float   # (upper - lower) / middle — ยิ่งกว้าง = volatile มาก
+
+
+def bollinger_bands(
+    closes: Sequence[float],
+    period: int = 20,
+    num_std: float = 2.0,
+) -> BollingerBands:
+    """
+    Bollinger Bands มาตรฐาน (SMA ± k×σ)
+    ใช้ประกอบการกำหนดกรอบ grid:
+      upper band = แนวต้านทางสถิติ
+      lower band = แนวรับทางสถิติ
+    """
+    if len(closes) < period:
+        mid = closes[-1]
+        return BollingerBands(mid * 1.05, mid, mid * 0.95, 0.10)
+
+    window = closes[-period:]
+    mid = sum(window) / period
+    variance = sum((x - mid) ** 2 for x in window) / period
+    std = _math.sqrt(variance)
+
+    upper = mid + num_std * std
+    lower = mid - num_std * std
+    bw = (upper - lower) / mid if mid > 0 else 0
+
+    return BollingerBands(upper=upper, middle=mid, lower=lower, bandwidth=bw)
+
+
+# ── Lookback High / Low ───────────────────────────────────────────────────────
+
+def lookback_high_low(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    lookback: int = 96,   # 96 × 15m = 24h
+) -> tuple[float, float]:
+    """ราคาสูงสุด/ต่ำสุดในช่วง lookback bars ล่าสุด."""
+    n = min(lookback, len(highs))
+    return max(highs[-n:]), min(lows[-n:])

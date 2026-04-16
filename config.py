@@ -51,6 +51,38 @@ class Config:
     # แนะนำ: ≥ 1 เท่าของ TF (เช่น 5m → MIN_RESET_INTERVAL=300)
     MIN_RESET_INTERVAL_SECONDS: float = float(os.getenv("MIN_RESET_INTERVAL_SECONDS", "300"))
 
+    # ── Dynamic Range (ATR-based auto initialization) ─────────────────────────
+    # AUTO_RANGE=true → คำนวณ Upper/Lower จาก ATR อัตโนมัติตอนเริ่มบอท
+    #                    (ไม่ต้องตั้ง UPPER_PRICE / LOWER_PRICE เอง)
+    AUTO_RANGE: bool = os.getenv("AUTO_RANGE", "false").lower() == "true"
+
+    # กลยุทธ์คำนวณกรอบ: "atr" | "bollinger" | "lookback" | "manual"
+    RANGE_STRATEGY: str = os.getenv("RANGE_STRATEGY", "atr").lower()
+
+    # ATR settings (ใช้เมื่อ RANGE_STRATEGY=atr)
+    ATR_PERIOD: int = int(os.getenv("ATR_PERIOD", "14"))
+    ATR_MULTIPLIER: float = float(os.getenv("ATR_MULTIPLIER", "2.0"))
+
+    # Bollinger Bands settings (ใช้เมื่อ RANGE_STRATEGY=bollinger)
+    BB_PERIOD: int = int(os.getenv("BB_PERIOD", "20"))
+    BB_STD: float = float(os.getenv("BB_STD", "2.0"))
+
+    # Lookback settings (ใช้เมื่อ RANGE_STRATEGY=lookback)
+    LOOKBACK_BARS: int = int(os.getenv("LOOKBACK_BARS", "96"))  # 96×15m = 24h
+    BUFFER_PCT: float = float(os.getenv("BUFFER_PCT", "0.05"))  # 5% buffer
+
+    # ── Boundary Alert & Auto-Stop ────────────────────────────────────────────
+    # แจ้งเตือนเมื่อราคาใกล้ขอบกรอบภายใน % นี้ (ค่าเริ่มต้น 3%)
+    PRICE_ALERT_PCT: float = float(os.getenv("PRICE_ALERT_PCT", "3.0"))
+
+    # หยุดบอทเมื่อราคาหลุดกรอบออกไป % นี้ (ค่าเริ่มต้น 5%)
+    AUTO_STOP_PCT: float = float(os.getenv("AUTO_STOP_PCT", "5.0"))
+
+    # ── Telegram Notifications ────────────────────────────────────────────────
+    # ดู README หรือ .env.example สำหรับวิธีหา token และ chat_id
+    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+
     # ── Profit targets & safety ────────────────────────────────────────────────
     # เป้ากำไรต่อวัน (% ของทุนทั้งหมด) — หยุดบอทเมื่อถึง
     DAILY_PROFIT_TARGET_PCT: float = float(os.getenv("DAILY_PROFIT_TARGET_PCT", "33"))
@@ -104,6 +136,12 @@ class Config:
             raise ValueError("EMA_SHORT must be less than EMA_LONG")
         if self.GRID_MODE not in ("trend", "both"):
             raise ValueError("GRID_MODE must be 'trend' or 'both'")
+        if self.RANGE_STRATEGY not in ("atr", "bollinger", "lookback", "manual"):
+            raise ValueError("RANGE_STRATEGY must be 'atr', 'bollinger', 'lookback', or 'manual'")
+        if self.PRICE_ALERT_PCT <= 0:
+            raise ValueError("PRICE_ALERT_PCT must be positive")
+        if self.AUTO_STOP_PCT <= 0:
+            raise ValueError("AUTO_STOP_PCT must be positive")
         if self.is_futures:
             if not 1 <= self.LEVERAGE <= 125:
                 raise ValueError("LEVERAGE must be between 1 and 125")

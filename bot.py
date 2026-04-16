@@ -32,6 +32,8 @@ from binance_client import binance, FuturesInfo
 from grid import GridEngine, GridDirection, OrderSide
 from strategy import strategy
 from indicators import TrendSignal
+from range_manager import calculate_range, check_boundary, GridRange
+import notifier
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -190,6 +192,28 @@ def _grid_table(engine: GridEngine, current_price: float) -> Table:
     return table
 
 
+def _range_panel(grid_range: GridRange, current_price: float, alert_pct: float, stop_pct: float) -> Panel:
+    status = check_boundary(current_price, grid_range, alert_pct, stop_pct)
+    upper_bar = min(int((1 - status.upper_dist_pct / alert_pct) * 5), 5) if status.upper_dist_pct >= 0 else 5
+    lower_bar = min(int((1 - status.lower_dist_pct / alert_pct) * 5), 5) if status.lower_dist_pct >= 0 else 5
+    upper_color = "red" if status.breached_upper else ("yellow" if status.near_upper else "green")
+    lower_color = "red" if status.breached_lower else ("yellow" if status.near_lower else "green")
+    lines = [
+        f"Strategy  : [cyan]{grid_range.strategy_used}[/cyan]"
+        + (f"   ATR={grid_range.atr_value:.4f}" if grid_range.atr_value else ""),
+        f"Upper     : [bold {upper_color}]${grid_range.upper:,.4f}[/bold {upper_color}]"
+        f"  ห่าง {'█' * upper_bar}{'░' * (5 - upper_bar)} {status.upper_dist_pct:.2f}%",
+        f"Lower     : [bold {lower_color}]${grid_range.lower:,.4f}[/bold {lower_color}]"
+        f"  ห่าง {'█' * lower_bar}{'░' * (5 - lower_bar)} {status.lower_dist_pct:.2f}%",
+        f"แจ้งเตือน : <{alert_pct:.0f}% จากขอบ   หยุดบอท : >{stop_pct:.0f}% หลุดกรอบ",
+    ]
+    border = "red" if status.should_stop else ("yellow" if status.should_alert else "dim")
+    title_suffix = " [bold red]⚠ หลุดกรอบ![/bold red]" if status.should_stop else (
+        " [yellow]⚠ ใกล้ขอบ[/yellow]" if status.should_alert else ""
+    )
+    return Panel("\n".join(lines), title=f"[bold]Grid Range[/bold]{title_suffix}", border_style=border)
+
+
 def _recent_fills_panel(engine: GridEngine) -> Panel:
     filled = sorted(engine.filled_orders(), key=lambda o: o.filled_at or 0, reverse=True)[:6]
     if not filled:
@@ -246,6 +270,9 @@ def run() -> None:
         console.print("\n[bold red]⚠  LIVE MODE — จะส่ง order จริงใน 5 วินาที (Ctrl+C ยกเลิก)[/bold red]")
         time.sleep(5)
 
+    # ── Telegram setup ────────────────────────────────────────────────────────
+    notifier.configure(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
+
     if config.is_futures:
         binance.setup_futures()
 
@@ -261,6 +288,48 @@ def run() -> None:
             f"[bold red]⚠  Balance ${balance:.2f} ไม่พอ — ต้องการ ${config.total_margin_required:.2f} USDT[/bold red]"
         )
         sys.exit(1)
+
+    # ── Auto Range Calculation ────────────────────────────────────────────────
+    grid_range: GridRange | None = None
+    if config.AUTO_RANGE and config.RANGE_STRATEGY != "manual":
+        console.print(
+            f"[cyan]คำนวณกรอบ Grid อัตโนมัติ (strategy={config.RANGE_STRATEGY})...[/cyan]"
+        )
+        try:
+            candles = binance.get_klines(config.SYMBOL, config.TIMEFRAME, limit=200)
+            grid_range = calculate_range(
+                candles,
+                current_price,
+                strategy=config.RANGE_STRATEGY,
+                atr_period=config.ATR_PERIOD,
+                atr_multiplier=config.ATR_MULTIPLIER,
+                bb_period=config.BB_PERIOD,
+                bb_std=config.BB_STD,
+                lookback_bars=config.LOOKBACK_BARS,
+                buffer_pct=config.BUFFER_PCT,
+            )
+            # Override config with calculated range
+            config.UPPER_PRICE = grid_range.upper
+            config.LOWER_PRICE = grid_range.lower
+            console.print(
+                f"[green]กรอบใหม่: ${grid_range.lower:.4f} – ${grid_range.upper:.4f}  "
+                f"({grid_range.summary()})[/green]"
+            )
+            notifier.alert_range_calculated(
+                config.SYMBOL, grid_range.strategy_used,
+                grid_range.upper, grid_range.lower, grid_range.atr_value,
+            )
+        except Exception as exc:
+            console.print(f"[yellow]⚠  Auto range ไม่สำเร็จ: {exc} — ใช้ค่าจาก .env แทน[/yellow]")
+            logger.warning("Auto range calculation failed: %s", exc)
+
+    if grid_range is None:
+        # Use manual range from .env
+        grid_range = GridRange(
+            upper=config.UPPER_PRICE,
+            lower=config.LOWER_PRICE,
+            strategy_used="Manual",
+        )
 
     if not (config.LOWER_PRICE < current_price < config.UPPER_PRICE):
         console.print(
@@ -285,6 +354,8 @@ def run() -> None:
     cycle = 0
     futures_info = None
     last_midnight = time.strftime("%Y-%m-%d")
+    _last_alert_upper = False
+    _last_alert_lower = False
 
     with Live(console=console, refresh_per_second=1, screen=False) as live:
         while _running:
@@ -305,12 +376,62 @@ def run() -> None:
                     f"({engine.stats.daily_profit_usdt / config.total_margin_required * 100:.1f}%)[/bold green]"
                 )
                 console.print("[yellow]หยุดบอทสำหรับวันนี้ — รันใหม่พรุ่งนี้[/yellow]")
+                notifier.alert_profit_target(
+                    config.SYMBOL,
+                    engine.stats.daily_profit_usdt,
+                    engine.stats.daily_profit_usdt / config.total_margin_required * 100,
+                )
                 break
 
             # ── Loss limit check ──────────────────────────────────────────────
             if engine.stats.realized_profit_usdt < -abs(config.MAX_LOSS_USDT):
                 console.print(f"[bold red]หยุดบอท: ขาดทุนเกิน ${config.MAX_LOSS_USDT:.2f} USDT[/bold red]")
+                notifier.alert_max_loss(
+                    config.SYMBOL,
+                    engine.stats.realized_profit_usdt,
+                    config.MAX_LOSS_USDT,
+                )
                 break
+
+            # ── Boundary check (alert + auto-stop) ───────────────────────────
+            boundary = check_boundary(
+                current_price, grid_range,
+                alert_pct=config.PRICE_ALERT_PCT,
+                stop_pct=config.AUTO_STOP_PCT,
+            )
+            if boundary.should_stop:
+                breach_side = "UPPER" if boundary.breached_upper else "LOWER"
+                logger.warning(
+                    "ราคาหลุดกรอบ %s: current=%.4f  upper=%.4f  lower=%.4f — หยุดบอท",
+                    breach_side, current_price, grid_range.upper, grid_range.lower,
+                )
+                console.print(
+                    f"[bold red]🚨 ราคาหลุดกรอบ {breach_side}! "
+                    f"${current_price:.4f} — หยุดบอทอัตโนมัติ[/bold red]"
+                )
+                notifier.alert_boundary_breached(
+                    config.SYMBOL, current_price, breach_side,
+                    grid_range.upper, grid_range.lower,
+                )
+                break
+            if boundary.near_upper and not _last_alert_upper:
+                logger.warning(
+                    "ราคาใกล้ขอบบน: %.4f  ห่าง %.2f%%", current_price, boundary.upper_dist_pct
+                )
+                notifier.alert_boundary_near(
+                    config.SYMBOL, current_price, "UPPER",
+                    boundary.upper_dist_pct, grid_range.upper, grid_range.lower,
+                )
+            if boundary.near_lower and not _last_alert_lower:
+                logger.warning(
+                    "ราคาใกล้ขอบล่าง: %.4f  ห่าง %.2f%%", current_price, boundary.lower_dist_pct
+                )
+                notifier.alert_boundary_near(
+                    config.SYMBOL, current_price, "LOWER",
+                    boundary.lower_dist_pct, grid_range.upper, grid_range.lower,
+                )
+            _last_alert_upper = boundary.near_upper
+            _last_alert_lower = boundary.near_lower
 
             # ── Re-analyze trend (with whipsaw protection) ───────────────────
             sig = strategy.analyze()
@@ -341,6 +462,10 @@ def run() -> None:
                 futures_info = binance.get_futures_info()
 
             # ── Build dashboard ───────────────────────────────────────────────
+            range_panel = _range_panel(
+                grid_range, current_price,
+                config.PRICE_ALERT_PCT, config.AUTO_STOP_PCT,
+            )
             layout = Layout()
             if config.is_futures:
                 layout.split_column(
@@ -356,24 +481,28 @@ def run() -> None:
                 )
                 layout["row2"].split_row(
                     Layout(_futures_panel(futures_info)),
-                    Layout(Panel(
-                        "[yellow]⚠  Futures เสี่ยงสูง\n"
-                        f"Leverage {config.LEVERAGE}x — ระวัง Liquidation\n"
-                        "Funding rate จ่ายทุก 8h\n"
-                        "แนะนำ Leverage ≤ 5x สำหรับ grid bot[/yellow]",
-                        title="คำเตือน", border_style="yellow"
-                    )),
+                    Layout(range_panel),
                 )
             else:
                 layout.split_column(
                     Layout(_header_panel(current_price, cycle, current_direction), size=3),
                     Layout(name="row1", size=9),
+                    Layout(name="row2", size=7),
                     Layout(_grid_table(engine, current_price), name="grid"),
                     Layout(_recent_fills_panel(engine), size=10),
                 )
                 layout["row1"].split_row(
                     Layout(_trend_panel(sig)),
                     Layout(_stats_panel(engine, daily_target)),
+                )
+                layout["row2"].split_row(
+                    Layout(range_panel),
+                    Layout(Panel(
+                        "[yellow]PRICE_ALERT_PCT: ราคาใกล้ขอบ\n"
+                        "AUTO_STOP_PCT: ราคาหลุดกรอบ\n"
+                        "AUTO_RANGE=true: คำนวณกรอบอัตโนมัติ[/yellow]",
+                        title="Range Settings", border_style="dim"
+                    )),
                 )
 
             live.update(layout)
