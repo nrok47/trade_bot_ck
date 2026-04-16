@@ -399,10 +399,24 @@ def run() -> None:
             # Override config with calculated range
             config.UPPER_PRICE = grid_range.upper
             config.LOWER_PRICE = grid_range.lower
+            range_width_pct = (grid_range.upper - grid_range.lower) / current_price * 100
+            width_color = "green" if range_width_pct >= 8 else ("yellow" if range_width_pct >= 4 else "red")
             console.print(
-                f"[green]กรอบใหม่: ${grid_range.lower:.4f} – ${grid_range.upper:.4f}  "
-                f"({grid_range.summary()})[/green]"
+                f"[{width_color}]กรอบใหม่: ${grid_range.lower:.4f} – ${grid_range.upper:.4f}  "
+                f"(กว้าง {range_width_pct:.1f}%  {grid_range.summary()})[/{width_color}]"
             )
+            if range_width_pct < 5.0:
+                console.print(
+                    f"[bold red]⚠  กรอบแคบเกินไป ({range_width_pct:.1f}%) — XRP เคลื่อน 3-8%/วัน "
+                    f"จะหลุดกรอบใน < 1 ชั่วโมง[/bold red]\n"
+                    f"[yellow]แก้ .env → RANGE_STRATEGY=lookback  หรือ  "
+                    f"ATR_MULTIPLIER={max(10, int(10/range_width_pct*config.ATR_MULTIPLIER))} "
+                    f"(สำหรับ TF {config.TIMEFRAME})[/yellow]"
+                )
+                logger.warning(
+                    "Range width %.1f%% is too narrow for %s TF — recommend RANGE_STRATEGY=lookback",
+                    range_width_pct, config.TIMEFRAME,
+                )
             notifier.alert_range_calculated(
                 config.SYMBOL, grid_range.strategy_used,
                 grid_range.upper, grid_range.lower, grid_range.atr_value,

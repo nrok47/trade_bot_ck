@@ -67,7 +67,9 @@ class Config:
     AUTO_RANGE: bool = os.getenv("AUTO_RANGE", "false").lower() == "true"
 
     # กลยุทธ์คำนวณกรอบ: "atr" | "bollinger" | "lookback" | "manual"
-    RANGE_STRATEGY: str = os.getenv("RANGE_STRATEGY", "atr").lower()
+    # แนะนำ: "lookback" สำหรับ TF สั้น (3m/5m/15m) — ใช้ High/Low จริงของ 24h
+    #         "atr" เหมาะกับ TF ยาว (1h+) เท่านั้น เพราะ ATR_MULTIPLIER ต้องปรับตาม TF
+    RANGE_STRATEGY: str = os.getenv("RANGE_STRATEGY", "lookback").lower()
 
     # ATR settings (ใช้เมื่อ RANGE_STRATEGY=atr)
     ATR_PERIOD: int = int(os.getenv("ATR_PERIOD", "14"))
