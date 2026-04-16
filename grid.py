@@ -134,18 +134,43 @@ class GridEngine:
         logger.info("Grid ready: %d BUY  %d SELL  direction=%s", buys, sells, direction.value)
 
     def reset(self) -> None:
-        """ยกเลิก order ทั้งหมดและล้าง state (เรียกเมื่อ trend เปลี่ยน)."""
+        """
+        ยกเลิก order ทั้งหมด + ปิด open position (Futures) ก่อนล้าง state
+        เรียกเมื่อ trend เปลี่ยน เพื่อป้องกัน position ค้างในทิศตรงข้าม
+        """
         logger.info("Grid reset (trend change)  resets=%d", self.stats.resets + 1)
+
+        # 1) ยกเลิก pending orders ก่อน
         for go in list(self.orders.values()):
             if go.status == "NEW":
                 binance.cancel_order(go.order_id)
+
+        # 2) ปิด open position ทันที (Futures เท่านั้น)
+        #    ถ้าไม่ทำ: Long ค้างอยู่ แต่ trend เปลี่ยนเป็น Bear → ขาดทุนต่อ
+        if config.is_futures:
+            binance.close_all_positions()
+
         self.orders.clear()
         self.stats.resets += 1
         self._initialized = False
 
     # ── Internal order helpers ────────────────────────────────────────────────
 
+    def _has_enough_margin(self) -> bool:
+        """เช็ค margin ก่อนเปิดไม้ใหม่ — ป้องกันกรณีทุนตึง."""
+        available = binance.get_available_margin()
+        required = config.USDT_PER_GRID * 1.05  # บวก 5% buffer
+        if available < required:
+            logger.warning(
+                "Margin ไม่พอ: available=$%.4f  required=$%.4f — ข้ามไม้นี้",
+                available, required,
+            )
+            return False
+        return True
+
     def _place_buy(self, level_index: int, price: float) -> Optional[GridOrder]:
+        if not self._has_enough_margin():
+            return None
         resp = binance.place_limit_buy(price, config.USDT_PER_GRID)
         if not resp:
             return None

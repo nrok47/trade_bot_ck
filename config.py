@@ -41,6 +41,16 @@ class Config:
     #   "both"   = grid สองทาง ไม่สนใจ trend (โหมดเดิม)
     GRID_MODE: str = os.getenv("GRID_MODE", "trend").lower()
 
+    # ── Whipsaw Protection ────────────────────────────────────────────────────
+    # จำนวน candle ที่ต้องเห็น signal เดิมติดต่อกัน ก่อนจะยอม reset grid
+    # ยิ่งสูง = นิ่งขึ้น (reset น้อยลง) แต่ตอบสนองช้าลง
+    # แนะนำ: TF 5m → 2-3 bars,  TF 15m → 2 bars
+    TREND_CONFIRM_BARS: int = int(os.getenv("TREND_CONFIRM_BARS", "2"))
+
+    # รอขั้นต่ำกี่วินาทีก่อน reset grid อีกครั้ง (ป้องกัน reset ถี่เกินไป)
+    # แนะนำ: ≥ 1 เท่าของ TF (เช่น 5m → MIN_RESET_INTERVAL=300)
+    MIN_RESET_INTERVAL_SECONDS: float = float(os.getenv("MIN_RESET_INTERVAL_SECONDS", "300"))
+
     # ── Profit targets & safety ────────────────────────────────────────────────
     # เป้ากำไรต่อวัน (% ของทุนทั้งหมด) — หยุดบอทเมื่อถึง
     DAILY_PROFIT_TARGET_PCT: float = float(os.getenv("DAILY_PROFIT_TARGET_PCT", "33"))

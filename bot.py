@@ -78,9 +78,14 @@ def _trend_panel(sig: TrendSignal) -> Panel:
     color = dir_color.get(sig.direction, "white")
     bull_color = "green" if sig.bull_power > 0 else "red"
     bear_color = "red" if sig.bear_power < 0 else "green"
+    raw_dir = strategy.raw_direction
+    raw_color = dir_color.get(raw_dir, "white")
+    confirm_bar = strategy.confirm_progress
     lines = [
-        f"Signal   : [bold {color}]{sig.label()}[/bold {color}]   "
+        f"Confirmed: [bold {color}]{sig.label()}[/bold {color}]   "
         f"Strength: {'█' * int(sig.strength * 5)}{'░' * (5 - int(sig.strength * 5))} {sig.strength*100:.0f}%",
+        f"Raw bar  : [{raw_color}]{raw_dir}[/{raw_color}]   "
+        f"Confirm: {confirm_bar} ({config.TREND_CONFIRM_BARS} bars needed)",
         f"EMA{config.EMA_SHORT:<2}    : {sig.ema_short:.4f}",
         f"EMA{config.EMA_LONG:<2}    : {sig.ema_long:.4f}",
         f"RSI({config.RSI_PERIOD})  : {sig.rsi_value:.1f}"
@@ -307,15 +312,25 @@ def run() -> None:
                 console.print(f"[bold red]หยุดบอท: ขาดทุนเกิน ${config.MAX_LOSS_USDT:.2f} USDT[/bold red]")
                 break
 
-            # ── Re-analyze trend ──────────────────────────────────────────────
+            # ── Re-analyze trend (with whipsaw protection) ───────────────────
             sig = strategy.analyze()
             new_direction = _signal_to_direction(sig)
 
             if engine._initialized and new_direction != current_direction:
-                logger.info("Trend เปลี่ยน: %s → %s — รีเซ็ต grid", current_direction.value, new_direction.value)
-                engine.reset()
-                current_direction = new_direction
-                engine.initialize(current_price, current_direction)
+                if strategy.can_reset_now():
+                    logger.info(
+                        "Trend เปลี่ยน: %s → %s — รีเซ็ต grid",
+                        current_direction.value, new_direction.value,
+                    )
+                    engine.reset()
+                    strategy.mark_reset()
+                    current_direction = new_direction
+                    engine.initialize(current_price, current_direction)
+                else:
+                    logger.debug(
+                        "Trend เปลี่ยนเป็น %s แต่ยังอยู่ใน cooldown — รอก่อน",
+                        new_direction.value,
+                    )
 
             # ── Poll order fills ──────────────────────────────────────────────
             newly_filled = engine.poll()

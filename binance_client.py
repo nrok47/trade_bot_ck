@@ -340,5 +340,42 @@ class BinanceClient:
         except BinanceAPIException as exc:
             logger.error("cancel_all_open_orders error: %s", exc)
 
+    def close_all_positions(self) -> None:
+        """
+        ปิด open position ทั้งหมดด้วย market order (Futures เท่านั้น)
+        เรียกตอน trend เปลี่ยน เพื่อป้องกัน position ค้าง
+        """
+        if not config.is_futures:
+            return
+        if config.DRY_RUN:
+            logger.info("[DRY RUN] Would close all open positions")
+            return
+        try:
+            positions = self._client.futures_position_information(symbol=config.SYMBOL)
+            for pos in positions:
+                amt = float(pos.get("positionAmt", 0))
+                if amt == 0:
+                    continue
+                # amt > 0 = Long → ต้องขาย, amt < 0 = Short → ต้องซื้อ
+                close_side = Client.SIDE_SELL if amt > 0 else Client.SIDE_BUY
+                close_qty = self._round_qty(abs(amt))
+                self._client.futures_create_order(
+                    symbol=config.SYMBOL,
+                    side=close_side,
+                    type=Client.FUTURE_ORDER_TYPE_MARKET,
+                    quantity=close_qty,
+                    reduceOnly=True,
+                )
+                logger.info(
+                    "Closed position: %s %.6f %s (market order)",
+                    close_side, close_qty, config.SYMBOL,
+                )
+        except BinanceAPIException as exc:
+            logger.error("close_all_positions error: %s", exc)
+
+    def get_available_margin(self) -> float:
+        """คืน margin ที่ใช้ได้ตอนนี้ (Futures: availableBalance, Spot: free USDT)."""
+        return self.get_balance("USDT")
+
 
 binance = BinanceClient()
