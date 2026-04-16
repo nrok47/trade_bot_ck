@@ -27,7 +27,7 @@ class Config:
 
     # ── Trend-following settings ───────────────────────────────────────────────
     # Timeframe สำหรับอ่าน candle: 1m, 3m, 5m, 15m, 30m
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "3m")
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
 
     # EMA periods
     EMA_SHORT: int = int(os.getenv("EMA_SHORT", "9"))
@@ -44,12 +44,12 @@ class Config:
     # ── Whipsaw Protection ────────────────────────────────────────────────────
     # จำนวน candle ที่ต้องเห็น signal เดิมติดต่อกัน ก่อนจะยอม reset grid
     # ยิ่งสูง = นิ่งขึ้น (reset น้อยลง) แต่ตอบสนองช้าลง
-    # แนะนำ: TF 3m → 3 bars (9 min),  TF 5m → 2-3 bars,  TF 15m → 2 bars
-    TREND_CONFIRM_BARS: int = int(os.getenv("TREND_CONFIRM_BARS", "3"))
+    # แนะนำ: TF 15m → 2 bars (30 min),  TF 5m → 2-3 bars,  TF 3m → 3 bars
+    TREND_CONFIRM_BARS: int = int(os.getenv("TREND_CONFIRM_BARS", "2"))
 
     # รอขั้นต่ำกี่วินาทีก่อน reset grid อีกครั้ง (ป้องกัน reset ถี่เกินไป)
-    # แนะนำ: ≥ 1 candle  → 3m=180, 5m=300, 15m=900
-    MIN_RESET_INTERVAL_SECONDS: float = float(os.getenv("MIN_RESET_INTERVAL_SECONDS", "180"))
+    # แนะนำ: ≥ 1 candle  → 15m=900, 5m=300, 3m=180
+    MIN_RESET_INTERVAL_SECONDS: float = float(os.getenv("MIN_RESET_INTERVAL_SECONDS", "900"))
 
     # ── Auto Re-grid (re-center เมื่อราคาเลื่อนออกจากศูนย์กลาง) ──────────────
     # AUTO_REGRID=true → re-center grid เมื่อราคาเคลื่อนเข้าโซนขอบ (top/bottom threshold%)
@@ -78,7 +78,7 @@ class Config:
     BB_STD: float = float(os.getenv("BB_STD", "2.0"))
 
     # Lookback settings (ใช้เมื่อ RANGE_STRATEGY=lookback)
-    LOOKBACK_BARS: int = int(os.getenv("LOOKBACK_BARS", "480"))  # 480×3m = 24h  (96×15m = 24h)
+    LOOKBACK_BARS: int = int(os.getenv("LOOKBACK_BARS", "96"))   # 96×15m = 24h  (480×3m = 24h)
     BUFFER_PCT: float = float(os.getenv("BUFFER_PCT", "0.05"))  # 5% buffer
 
     # ── Boundary Alert & Auto-Stop ────────────────────────────────────────────
