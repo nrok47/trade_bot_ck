@@ -460,7 +460,8 @@ def run() -> None:
     _last_alert_upper = False
     _last_alert_lower = False
     _last_heartbeat_cycle = 0
-    _heartbeat_interval = max(1, int(60 / config.POLL_INTERVAL_SECONDS))
+    _heartbeat_interval = max(1, int(180 / config.POLL_INTERVAL_SECONDS))  # ทุก 3 นาที
+    _last_cooldown_direction: str = ""
 
     with Live(console=console, refresh_per_second=0.5, screen=True) as live:
         while _running:
@@ -582,12 +583,15 @@ def run() -> None:
                     engine.reset()
                     strategy.mark_reset()
                     current_direction = new_direction
+                    _last_cooldown_direction = ""
                     engine.initialize(current_price, current_direction)
                 else:
-                    logger.info(
-                        "⏳ Trend signal ใหม่: %s แต่ยัง cooldown — รอก่อน (ราคา $%.4f)",
-                        new_direction.value, current_price,
-                    )
+                    if new_direction.value != _last_cooldown_direction:
+                        logger.info(
+                            "⏳ Signal %s แต่ยัง cooldown — รอก่อน (ราคา $%.4f)",
+                            new_direction.value, current_price,
+                        )
+                        _last_cooldown_direction = new_direction.value
 
             # ── Poll order fills ──────────────────────────────────────────────
             newly_filled = engine.poll()
