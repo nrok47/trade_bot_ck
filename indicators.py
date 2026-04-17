@@ -121,6 +121,7 @@ def analyze_trend(
     ema_short_period: int = 9,
     ema_long_period: int = 21,
     rsi_period: int = 14,
+    ema_min_gap_pct: float = 0.1,
 ) -> TrendSignal:
     """
     รวม EMA + RSI + Bull/Bear Power เป็น signal เดียว
@@ -159,9 +160,14 @@ def analyze_trend(
             highs[:-1], lows[:-1], closes[:-1], ema_short_period
         )
 
+    # EMA gap filter: ต้องห่างกันอย่างน้อย ema_min_gap_pct% ถึงนับเป็น signal
+    # ป้องกัน noise cross เมื่อ EMA ห่างกันแค่ $0.0001 ในช่วง sideways
+    ema_gap_pct = abs(ema_s - ema_l) / ema_l * 100 if ema_l > 0 else 0
+    ema_gap_ok = ema_gap_pct >= ema_min_gap_pct
+
     # Score bull conditions (0–4)
     bull_score = sum([
-        ema_s > ema_l,
+        ema_s > ema_l and ema_gap_ok,
         rsi_val > 50,
         bull_p > 0,
         bear_p > prev_bear_p,   # bear power improving (less negative)
@@ -169,7 +175,7 @@ def analyze_trend(
 
     # Score bear conditions (0–4)
     bear_score = sum([
-        ema_s < ema_l,
+        ema_s < ema_l and ema_gap_ok,
         rsi_val < 50,
         bear_p < 0,
         bull_p < prev_bull_p,   # bull power weakening

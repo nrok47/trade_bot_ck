@@ -84,6 +84,7 @@ class TrendStrategy:
             ema_short_period=config.EMA_SHORT,
             ema_long_period=config.EMA_LONG,
             rsi_period=config.RSI_PERIOD,
+            ema_min_gap_pct=config.EMA_MIN_GAP_PCT,
         )
         self._last_signal = raw_signal
         self._last_check_time = time.time()

@@ -36,6 +36,12 @@ class Config:
     # RSI period
     RSI_PERIOD: int = int(os.getenv("RSI_PERIOD", "14"))
 
+    # % ขั้นต่ำที่ EMA short ต้องห่างจาก EMA long ถึงจะนับเป็น condition 1
+    # ป้องกัน noise cross เมื่อ EMA ห่างกันแค่ $0.0001 ในช่วง sideways
+    # 0.1 = EMA9 ต้องสูงกว่า EMA21 อย่างน้อย 0.1% ของราคา
+    # สูง = signal เข้มงวดขึ้น reset น้อยลง แต่ตอบสนองช้าลง
+    EMA_MIN_GAP_PCT: float = float(os.getenv("EMA_MIN_GAP_PCT", "0.1"))
+
     # Grid direction mode:
     #   "trend"  = ตาม bull/bear signal (แนะนำ)
     #   "both"   = grid สองทาง ไม่สนใจ trend (โหมดเดิม)
