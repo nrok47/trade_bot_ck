@@ -67,6 +67,7 @@ def save_state(
                     "qty": o.qty,
                     "status": o.status,
                     "filled_at": o.filled_at,
+                    "stop_loss_price": o.stop_loss_price,
                 }
                 for o in engine.orders.values()
             ],
@@ -119,6 +120,7 @@ def restore_engine(engine: "GridEngine", state: dict) -> None:
             qty=o["qty"],
             status=o["status"],
             filled_at=o.get("filled_at"),
+            stop_loss_price=o.get("stop_loss_price"),
         )
         engine.orders[go.order_id] = go
 

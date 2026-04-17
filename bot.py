@@ -511,6 +511,8 @@ def run() -> None:
             grid_range = _saved_range
             regrid_count = saved.get("regrid_count", 0)
             console.print(f"[cyan]▶ ต่อจาก state เก่า: {saved['saved_at']}[/cyan]")
+            console.print("[cyan]กำลัง reconcile orders กับ Binance...[/cyan]")
+            engine.reconcile_live_orders()
         except Exception as exc:
             logger.warning("State restore failed: %s — เริ่มใหม่", exc)
             saved = None
@@ -775,6 +777,9 @@ def run() -> None:
     state_manager.save_state(engine, grid_range, current_direction, regrid_count, cycle)
     console.print("[yellow]ยกเลิก open orders ทั้งหมด...[/yellow]")
     binance.cancel_all_open_orders()
+    if config.is_futures:
+        console.print("[yellow]ปิด futures positions ทั้งหมด (market order)...[/yellow]")
+        binance.close_all_positions()
 
     s = engine.stats
     cap = config.total_margin_required

@@ -147,6 +147,36 @@ class GridEngine:
         if sell_waits:
             logger.info("รอ SELL ที่: %s  (ราคาต้องขึ้นถึง)", " | ".join(sell_waits))
 
+    def reconcile_live_orders(self) -> None:
+        """
+        Live restart: เทียบ saved state กับสถานะจริงบน Binance
+        ถ้า order fill ขณะ bot offline → trigger _on_fill() ให้ถูกต้อง
+        """
+        if config.DRY_RUN:
+            return
+        newly_filled: list[GridOrder] = []
+        for go in list(self.orders.values()):
+            if go.status != "NEW" or go.order_id.startswith("DRY_"):
+                continue
+            actual = binance.get_order_status(go.order_id)
+            if actual == "FILLED":
+                go.status = "FILLED"
+                go.filled_at = time.time()
+                newly_filled.append(go)
+                logger.info(
+                    "Reconcile: order %s (level %d %s) filled offline → _on_fill",
+                    go.order_id, go.level_index, go.side.value,
+                )
+            elif actual in ("CANCELED", "EXPIRED", "REJECTED"):
+                go.status = actual
+                logger.info("Reconcile: order %s is %s — skipped", go.order_id, actual)
+            elif actual is None:
+                logger.warning("Reconcile: order %s not found on Binance", go.order_id)
+        for go in newly_filled:
+            self._on_fill(go)
+        if newly_filled:
+            logger.info("Reconcile complete: %d missed fills processed", len(newly_filled))
+
     def reset(self, soft: bool = False) -> None:
         """
         ยกเลิก pending orders + ล้าง state
@@ -269,6 +299,25 @@ class GridEngine:
                     go.filled_at = time.time()
                     newly_filled.append(go)
             else:
+                # Live mode: ตรวจ Stop Loss ก่อน query Binance
+                if (go.side == OrderSide.SELL and go.stop_loss_price
+                        and config.STOP_LOSS_PCT > 0):
+                    current_price = binance.get_price()
+                    if current_price <= go.stop_loss_price:
+                        binance.cancel_order(go.order_id)
+                        binance.close_position_qty(go.qty, is_long=True)
+                        loss = (current_price - go.price) * go.qty
+                        self.stats.realized_profit_usdt += loss
+                        self.stats.daily_profit_usdt += loss
+                        go.status = "CANCELED"
+                        logger.warning(
+                            "🛑 SL (live) @ $%.4f (level %d) loss=%.4f USDT",
+                            current_price, go.level_index, loss,
+                        )
+                        notifier.alert_stop_loss(config.SYMBOL, current_price,
+                                                 loss, go.level_index)
+                        continue
+
                 status = binance.get_order_status(go.order_id)
                 if status == "FILLED":
                     go.status = "FILLED"

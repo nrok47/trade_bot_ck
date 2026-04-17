@@ -369,6 +369,27 @@ class BinanceClient:
         except BinanceAPIException as exc:
             logger.error("cancel_all_open_orders error: %s", exc)
 
+    def close_position_qty(self, qty: float, is_long: bool) -> None:
+        """ปิด position เฉพาะ qty ที่ระบุ (reduceOnly market order) — ใช้ตอน Stop Loss."""
+        if not config.is_futures:
+            return
+        if config.DRY_RUN:
+            logger.info("[DRY RUN] Would close %.6f %s position", qty, "LONG" if is_long else "SHORT")
+            return
+        try:
+            close_side = Client.SIDE_SELL if is_long else Client.SIDE_BUY
+            close_qty = self._round_qty(qty)
+            self._client.futures_create_order(
+                symbol=config.SYMBOL,
+                side=close_side,
+                type=Client.FUTURE_ORDER_TYPE_MARKET,
+                quantity=close_qty,
+                reduceOnly=True,
+            )
+            logger.info("SL close: %s %.6f %s (market)", close_side, close_qty, config.SYMBOL)
+        except BinanceAPIException as exc:
+            logger.error("close_position_qty error: %s", exc)
+
     def close_all_positions(self) -> None:
         """
         ปิด open position ทั้งหมดด้วย market order (Futures เท่านั้น)
