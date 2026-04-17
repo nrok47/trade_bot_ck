@@ -47,6 +47,12 @@ class Config:
     #   "both"   = grid สองทาง ไม่สนใจ trend (โหมดเดิม)
     GRID_MODE: str = os.getenv("GRID_MODE", "trend").lower()
 
+    # ── Stop Loss per grid ────────────────────────────────────────────────────
+    # % ต่ำกว่าราคา BUY ที่จะตัดขาดทุน (0 = ปิด feature)
+    # ตัวอย่าง: STOP_LOSS_PCT=3.0  BUY @$1.43 → SL @$1.387 (-3%)
+    # แนะนำ: 1.5–3x ของ grid spacing  (spacing=$0.018 → SL=2.5–5%)
+    STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0"))
+
     # ── Whipsaw Protection ────────────────────────────────────────────────────
     # จำนวน candle ที่ต้องเห็น signal เดิมติดต่อกัน ก่อนจะยอม reset grid
     # ยิ่งสูง = นิ่งขึ้น (reset น้อยลง) แต่ตอบสนองช้าลง

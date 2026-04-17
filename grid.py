@@ -38,6 +38,7 @@ from typing import Optional
 
 from config import config
 from binance_client import binance
+import notifier
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class GridOrder:
     qty: float
     status: str = "NEW"
     filled_at: Optional[float] = None
+    stop_loss_price: Optional[float] = None  # ราคา SL สำหรับ BUY orders
 
 
 @dataclass
@@ -201,12 +203,14 @@ class GridEngine:
         if not resp:
             return None
         qty = config.notional_per_grid / price
+        sl_price = round(price * (1 - config.STOP_LOSS_PCT / 100), 6) if config.STOP_LOSS_PCT > 0 else None
         go = GridOrder(
             level_index=level_index,
             price=price,
             side=OrderSide.BUY,
             order_id=str(resp["orderId"]),
             qty=float(resp.get("origQty", qty)),
+            stop_loss_price=sl_price,
         )
         self.orders[go.order_id] = go
         self.stats.total_usdt_spent += config.USDT_PER_GRID
@@ -239,8 +243,23 @@ class GridEngine:
                 continue
 
             if go.order_id.startswith("DRY_"):
-                # จำลอง fill ตามราคาปัจจุบัน
                 current_price = binance.get_price()
+
+                # ── Stop Loss check (BUY ที่ fill แล้วรอ SELL) ──────────────
+                if (go.side == OrderSide.SELL and go.stop_loss_price
+                        and current_price <= go.stop_loss_price):
+                    loss = (current_price - go.price) * go.qty
+                    self.stats.realized_profit_usdt += loss
+                    self.stats.daily_profit_usdt += loss
+                    go.status = "CANCELED"
+                    logger.warning(
+                        "🛑 Stop Loss @ $%.4f (level %d) loss=%.4f USDT",
+                        current_price, go.level_index, loss,
+                    )
+                    notifier.alert_stop_loss(config.SYMBOL, current_price,
+                                             loss, go.level_index)
+                    continue
+
                 if go.side == OrderSide.BUY and current_price <= go.price:
                     go.status = "FILLED"
                     go.filled_at = time.time()
@@ -275,7 +294,12 @@ class GridEngine:
                     " → วาง SELL รอที่ $%.4f | กำไรคาด +$%.4f USDT",
                     go.price, go.level_index, go.qty, sell_price, profit,
                 )
-                self._place_sell_at_level(sell_idx, sell_price, go.qty)
+                notifier.alert_fill_buy(config.SYMBOL, go.price, go.qty,
+                                        sell_price, profit)
+                sell_order = self._place_sell_at_level(sell_idx, sell_price, go.qty)
+                # ส่ง stop_loss_price ไปกับ SELL order เพื่อ track ตอน DRY_RUN
+                if sell_order and go.stop_loss_price:
+                    sell_order.stop_loss_price = go.stop_loss_price
             else:
                 logger.warning("BUY filled at top level — no SELL level above")
 
@@ -298,6 +322,9 @@ class GridEngine:
                         d_sign, self.stats.daily_profit_usdt,
                         self.stats.realized_profit_usdt,
                     )
+                    notifier.alert_fill_sell(config.SYMBOL, go.price, profit,
+                                             self.stats.daily_profit_usdt,
+                                             self.stats.realized_profit_usdt)
                     # Re-place SELL entry one level up (if available)
                     resell_idx = go.level_index + 1
                     if resell_idx < len(self.levels):
@@ -321,6 +348,9 @@ class GridEngine:
                         d_sign, self.stats.daily_profit_usdt,
                         self.stats.realized_profit_usdt,
                     )
+                    notifier.alert_fill_sell(config.SYMBOL, go.price, profit,
+                                             self.stats.daily_profit_usdt,
+                                             self.stats.realized_profit_usdt)
                     # Re-place BUY at the lower level
                     self._place_buy(buy_idx, buy_price)
 

@@ -144,3 +144,45 @@ def alert_range_calculated(symbol: str, strategy: str, upper: float,
         f"_บอทเริ่มทำงานแล้ว_"
     )
     send_alert(msg)
+
+
+def alert_fill_buy(symbol: str, price: float, qty: float,
+                   sell_target: float, expected_profit: float) -> None:
+    """แจ้งเมื่อ BUY order fill — บอกว่าเข้าที่ไหน รอ SELL ที่ไหน."""
+    msg = (
+        f"✅ *{symbol} BUY เข้าแล้ว!*\n\n"
+        f"เข้าที่: `${price:,.4f}`\n"
+        f"จำนวน: `{qty:.4f}`\n"
+        f"รอ SELL ที่: `${sell_target:,.4f}`\n"
+        f"กำไรคาด: `+${expected_profit:.4f} USDT`"
+    )
+    send_alert(msg, silent=True)
+
+
+def alert_fill_sell(symbol: str, price: float, profit: float,
+                    daily_profit: float, total_profit: float) -> None:
+    """แจ้งเมื่อ SELL ปิดกำไร — สรุป P&L."""
+    cap = profit / daily_profit * 100 if daily_profit else 0
+    d_sign = "+" if daily_profit >= 0 else ""
+    t_sign = "+" if total_profit >= 0 else ""
+    msg = (
+        f"💰 *{symbol} ปิดกำไรแล้ว!*\n\n"
+        f"SELL ที่: `${price:,.4f}`\n"
+        f"รอบนี้: `+${profit:.4f} USDT`\n"
+        f"วันนี้รวม: `{d_sign}${daily_profit:.4f} USDT`\n"
+        f"รวมทั้งหมด: `{t_sign}${total_profit:.4f} USDT`"
+    )
+    send_alert(msg, silent=True)
+
+
+def alert_stop_loss(symbol: str, price: float, loss: float,
+                    level: int) -> None:
+    """แจ้งเมื่อ stop loss trigger."""
+    msg = (
+        f"🛑 *{symbol} Stop Loss triggered!*\n\n"
+        f"ราคา: `${price:,.4f}`\n"
+        f"Level: `{level}`\n"
+        f"ขาดทุนรอบนี้: `-${abs(loss):.4f} USDT`\n\n"
+        f"_ปิด position เพื่อจำกัดขาดทุนแล้ว_"
+    )
+    send_alert(msg)

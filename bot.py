@@ -34,6 +34,7 @@ from strategy import strategy
 from indicators import TrendSignal
 from range_manager import calculate_range, check_boundary, GridRange
 import notifier
+import state_manager
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -449,14 +450,42 @@ def run() -> None:
     )
 
     engine = GridEngine()
-    current_direction = _signal_to_direction(sig)
-    engine.initialize(current_price, current_direction)
+
+    # ── โหลด state เก่า (ถ้ามี) ──────────────────────────────────────────────
+    saved = state_manager.load_state()
+    if saved:
+        from grid import GridDirection as _GD
+        from range_manager import GridRange as _GR
+        try:
+            _saved_dir = _GD(saved["direction"])
+            _saved_range = _GR(
+                upper=saved["grid_range"]["upper"],
+                lower=saved["grid_range"]["lower"],
+                strategy_used=saved["grid_range"].get("strategy_used", "Restored"),
+                atr_value=saved["grid_range"].get("atr_value", 0.0),
+            )
+            config.UPPER_PRICE = _saved_range.upper
+            config.LOWER_PRICE = _saved_range.lower
+            engine.levels = engine._compute_levels()
+            state_manager.restore_engine(engine, saved)
+            current_direction = _saved_dir
+            grid_range = _saved_range
+            regrid_count = saved.get("regrid_count", 0)
+            console.print(f"[cyan]▶ ต่อจาก state เก่า: {saved['saved_at']}[/cyan]")
+        except Exception as exc:
+            logger.warning("State restore failed: %s — เริ่มใหม่", exc)
+            saved = None
+
+    if not saved:
+        current_direction = _signal_to_direction(sig)
+        engine.initialize(current_price, current_direction)
+        regrid_count = 0
 
     daily_target = config.daily_profit_target_usdt
     cycle = 0
-    regrid_count = 0
     futures_info = None
     last_midnight = time.strftime("%Y-%m-%d")
+    _save_interval = max(1, int(30 / config.POLL_INTERVAL_SECONDS))  # บันทึกทุก 30 วินาที
     _last_alert_upper = False
     _last_alert_lower = False
     _last_heartbeat_cycle = 0
@@ -630,6 +659,12 @@ def run() -> None:
                     engine.stats.runtime_hours,
                 )
 
+            # ── Save state (ทุก 30 วินาที) ───────────────────────────────────
+            if cycle % _save_interval == 0:
+                state_manager.save_state(
+                    engine, grid_range, current_direction, regrid_count, cycle
+                )
+
             # ── Build dashboard ───────────────────────────────────────────────
             range_panel = _range_panel(
                 grid_range, current_price,
@@ -683,6 +718,7 @@ def run() -> None:
                 time.sleep(1)
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
+    state_manager.save_state(engine, grid_range, current_direction, regrid_count, cycle)
     console.print("[yellow]ยกเลิก open orders ทั้งหมด...[/yellow]")
     binance.cancel_all_open_orders()
 
