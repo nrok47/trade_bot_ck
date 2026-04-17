@@ -33,20 +33,37 @@ from indicators import (
 
 # ── Data fetch ────────────────────────────────────────────────────────────────
 
-def fetch_klines(symbol: str, interval: str, days: int) -> CandleData:
-    """ดึง OHLCV ย้อนหลัง N วันจาก Binance Futures."""
+def fetch_klines(symbol: str, interval: str, days: int) -> tuple[CandleData, list[int]]:
+    """ดึง OHLCV ย้อนหลัง N วันจาก Binance Futures (paginated — ไม่จำกัด 1500 candles)."""
     tf_minutes = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30}
     mins = tf_minutes.get(interval, 5)
-    limit = min(days * 24 * 60 // mins, 1500)
+    total_needed = days * 24 * 60 // mins
 
     client = Client()
-    raw = client.futures_klines(symbol=symbol, interval=interval, limit=limit)
-    opens   = [float(k[1]) for k in raw]
-    highs   = [float(k[2]) for k in raw]
-    lows    = [float(k[3]) for k in raw]
-    closes  = [float(k[4]) for k in raw]
-    volumes = [float(k[5]) for k in raw]
-    timestamps = [int(k[0]) for k in raw]
+    all_raw: list = []
+    end_time: int | None = None
+    remaining = total_needed
+
+    while remaining > 0:
+        fetch_limit = min(remaining, 1500)
+        kwargs: dict = {"symbol": symbol, "interval": interval, "limit": fetch_limit}
+        if end_time is not None:
+            kwargs["endTime"] = end_time
+        batch = client.futures_klines(**kwargs)
+        if not batch:
+            break
+        all_raw = batch + all_raw
+        remaining -= len(batch)
+        end_time = int(batch[0][0]) - 1  # ดึงก่อน candle แรกที่ได้
+        if len(batch) < fetch_limit:
+            break  # ข้อมูลหมดแล้ว
+
+    opens      = [float(k[1]) for k in all_raw]
+    highs      = [float(k[2]) for k in all_raw]
+    lows       = [float(k[3]) for k in all_raw]
+    closes     = [float(k[4]) for k in all_raw]
+    volumes    = [float(k[5]) for k in all_raw]
+    timestamps = [int(k[0])   for k in all_raw]
     return CandleData(opens, highs, lows, closes, volumes), timestamps
 
 
