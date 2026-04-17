@@ -283,7 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("--symbol",  type=str,   default=config.SYMBOL,    help="เหรียญ เช่น XRPUSDT")
     parser.add_argument("--grids",   type=int,   default=config.GRID_COUNT)
     parser.add_argument("--usdt",    type=float, default=config.USDT_PER_GRID)
-    parser.add_argument("--sl",      type=float, default=config.STOP_LOSS_PCT, help="Stop loss % (0=ปิด)")
+    parser.add_argument("--sl",      type=float, default=config.STOP_LOSS_PCT, help="Stop loss pct (0=ปิด)")
     parser.add_argument("--save",    action="store_true", help="บันทึกผลลง backtest_result.json")
     args = parser.parse_args()
 
