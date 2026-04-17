@@ -276,6 +276,83 @@ def bollinger_bands(
     return BollingerBands(upper=upper, middle=mid, lower=lower, bandwidth=bw)
 
 
+# ── CDC Action Zone ───────────────────────────────────────────────────────────
+
+@dataclass
+class CDCZone:
+    """
+    CDC Action Zone by HAP — จัดโซนราคาตาม position ของ Price vs Fast EMA vs Slow EMA
+
+    Bullish EMAs (Fast > Slow):
+      1: Price > Fast > Slow  → BULL      (full bull)
+      2: Fast > Price > Slow  → NEUTRAL   (weak bull / pullback)
+      3: Fast > Slow > Price  → NEUTRAL   (caution, deep pullback)
+    Bearish EMAs (Fast < Slow):
+      4: Price < Fast < Slow  → BEAR      (full bear)
+      5: Fast < Price < Slow  → NEUTRAL   (weak bear / bounce)
+      6: Fast < Slow < Price  → NEUTRAL   (caution bear)
+
+    strict=True  → BULL เฉพาะ zone 1, BEAR เฉพาะ zone 4
+    strict=False → BULL = zones 1-3, BEAR = zones 4-6
+    """
+    zone: int        # 1–6
+    name: str        # BULL | WEAK_BULL | CAUTION | BEAR | WEAK_BEAR | CAUTION_BEAR
+    direction: str   # BULL | BEAR | NEUTRAL
+    fast_ema: float
+    slow_ema: float
+    price: float
+
+    def as_trend_signal(self) -> "TrendSignal":
+        return TrendSignal(
+            direction=self.direction,
+            ema_short=self.fast_ema,
+            ema_long=self.slow_ema,
+            rsi_value=50.0,
+            bull_power=float(self.zone),
+            bear_power=0.0,
+            strength=1.0 if self.zone in (1, 4) else 0.5,
+        )
+
+
+def cdc_action_zone(
+    candles: CandleData,
+    fast: int = 12,
+    slow: int = 26,
+    strict: bool = True,
+) -> CDCZone:
+    fast_vals = ema(candles.closes, fast)
+    slow_vals = ema(candles.closes, slow)
+    if not fast_vals or not slow_vals:
+        p = candles.closes[-1] if candles.closes else 0.0
+        return CDCZone(0, "NEUTRAL", "NEUTRAL", 0.0, 0.0, p)
+
+    f = fast_vals[-1]
+    s = slow_vals[-1]
+    p = candles.closes[-1]
+
+    if f > s:  # Bullish EMAs
+        if p > f:
+            zone, name = 1, "BULL"
+        elif p > s:
+            zone, name = 2, "WEAK_BULL"
+        else:
+            zone, name = 3, "CAUTION"
+    else:      # Bearish EMAs
+        if p < f:
+            zone, name = 4, "BEAR"
+        elif p < s:
+            zone, name = 5, "WEAK_BEAR"
+        else:
+            zone, name = 6, "CAUTION_BEAR"
+
+    if strict:
+        direction = "BULL" if zone == 1 else ("BEAR" if zone == 4 else "NEUTRAL")
+    else:
+        direction = "BULL" if zone <= 3 else "BEAR"
+
+    return CDCZone(zone=zone, name=name, direction=direction, fast_ema=f, slow_ema=s, price=p)
+
+
 # ── Lookback High / Low ───────────────────────────────────────────────────────
 
 def lookback_high_low(

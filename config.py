@@ -80,6 +80,16 @@ class Config:
     PRICE_ALERT_PCT: float = _float("PRICE_ALERT_PCT", "3.0")
     AUTO_STOP_PCT: float = _float("AUTO_STOP_PCT", "5.0")
 
+    # ── Signal mode ───────────────────────────────────────────────────────────
+    # "ema" = EMA crossover + RSI + Bull/Bear Power (default)
+    # "cdc" = CDC Action Zone by HAP (Price vs FastEMA vs SlowEMA)
+    SIGNAL_MODE: str = (os.getenv("SIGNAL_MODE", "ema") or "ema").lower()
+    CDC_FAST: int = _int("CDC_FAST", "12")
+    CDC_SLOW: int = _int("CDC_SLOW", "26")
+    # strict=true → BULL เฉพาะ zone1, BEAR เฉพาะ zone4
+    # strict=false → BULL=zones1-3, BEAR=zones4-6 (ก้าวร้าวกว่า)
+    CDC_STRICT: bool = (os.getenv("CDC_STRICT", "true") or "true").lower() == "true"
+
     # ── Proxy ─────────────────────────────────────────────────────────────────
     PROXY_URL: str = os.getenv("PROXY_URL", "")
 
@@ -134,6 +144,8 @@ class Config:
             raise ValueError("USDT_PER_GRID must be positive")
         if self.TIMEFRAME not in VALID_TIMEFRAMES:
             raise ValueError(f"TIMEFRAME must be one of {VALID_TIMEFRAMES}")
+        if self.SIGNAL_MODE not in ("ema", "cdc"):
+            raise ValueError("SIGNAL_MODE must be 'ema' or 'cdc'")
         if self.EMA_SHORT >= self.EMA_LONG:
             raise ValueError("EMA_SHORT must be less than EMA_LONG")
         if self.GRID_MODE not in ("trend", "both"):

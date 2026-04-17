@@ -18,7 +18,7 @@ from collections import deque
 
 from binance_client import binance
 from config import config
-from indicators import CandleData, TrendSignal, analyze_trend
+from indicators import CandleData, TrendSignal, analyze_trend, cdc_action_zone
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +79,21 @@ class TrendStrategy:
             return self._confirmed_signal or TrendSignal("NEUTRAL", 0, 0, 50, 0, 0, 0)
 
         self._candle_count += 1
-        raw_signal = analyze_trend(
-            candles,
-            ema_short_period=config.EMA_SHORT,
-            ema_long_period=config.EMA_LONG,
-            rsi_period=config.RSI_PERIOD,
-            ema_min_gap_pct=config.EMA_MIN_GAP_PCT,
-        )
+        if config.SIGNAL_MODE == "cdc":
+            cdc = cdc_action_zone(candles, config.CDC_FAST, config.CDC_SLOW, config.CDC_STRICT)
+            raw_signal = cdc.as_trend_signal()
+            logger.debug(
+                "CDC Zone %d (%s) → %s  FastEMA=%.4f  SlowEMA=%.4f",
+                cdc.zone, cdc.name, cdc.direction, cdc.fast_ema, cdc.slow_ema,
+            )
+        else:
+            raw_signal = analyze_trend(
+                candles,
+                ema_short_period=config.EMA_SHORT,
+                ema_long_period=config.EMA_LONG,
+                rsi_period=config.RSI_PERIOD,
+                ema_min_gap_pct=config.EMA_MIN_GAP_PCT,
+            )
         self._last_signal = raw_signal
         self._last_check_time = time.time()
 

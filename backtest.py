@@ -27,6 +27,7 @@ from binance.client import Client
 from config import config
 from indicators import (
     CandleData, TrendSignal, analyze_trend, ema, rsi, lookback_high_low,
+    cdc_action_zone,
 )
 
 
@@ -104,8 +105,13 @@ def run_backtest(
     stop_loss_pct: float,
     grid_mode: str,
     fee_rate: float = 0.0002,
+    signal_mode: str = "ema",
+    cdc_fast: int = 12,
+    cdc_slow: int = 26,
+    cdc_strict: bool = True,
 ) -> BTResult:
-    print(f"\n📊 Backtest: {symbol} | TF={interval} | {days}d | {grid_count} grids")
+    mode_label = f"CDC(fast={cdc_fast},slow={cdc_slow})" if signal_mode == "cdc" else "EMA"
+    print(f"\n📊 Backtest: {symbol} | TF={interval} | {days}d | {grid_count} grids | signal={mode_label}")
     print("กำลังดึงข้อมูลจาก Binance...")
 
     candles, timestamps = fetch_klines(symbol, interval, days)
@@ -137,7 +143,10 @@ def run_backtest(
         ts = timestamps[i] / 1000
 
         # ── Trend signal ──────────────────────────────────────────────────────
-        sig = analyze_trend(window, ema_short, ema_long, rsi_period, ema_min_gap_pct)
+        if signal_mode == "cdc":
+            sig = cdc_action_zone(window, cdc_fast, cdc_slow, cdc_strict).as_trend_signal()
+        else:
+            sig = analyze_trend(window, ema_short, ema_long, rsi_period, ema_min_gap_pct)
         confirmed_dir_queue.append(sig.direction)
         if len(confirmed_dir_queue) > trend_confirm_bars:
             confirmed_dir_queue.pop(0)
@@ -304,9 +313,16 @@ if __name__ == "__main__":
     parser.add_argument("--symbol",  type=str,   default=config.SYMBOL,    help="เหรียญ เช่น XRPUSDT")
     parser.add_argument("--grids",   type=int,   default=config.GRID_COUNT)
     parser.add_argument("--usdt",    type=float, default=config.USDT_PER_GRID)
-    parser.add_argument("--sl",      type=float, default=config.STOP_LOSS_PCT, help="Stop loss pct (0=ปิด)")
-    parser.add_argument("--fee",     type=float, default=0.02, help="ค่าธรรมเนียม pct/fill (default 0.02 = maker)")
-    parser.add_argument("--save",    action="store_true", help="บันทึกผลลง backtest_result.json")
+    parser.add_argument("--sl",           type=float, default=config.STOP_LOSS_PCT,           help="Stop loss pct (0=ปิด)")
+    parser.add_argument("--fee",          type=float, default=0.02,                            help="ค่าธรรมเนียม pct/fill (default 0.02=maker, 0.04=taker)")
+    parser.add_argument("--min-reset",    type=float, default=config.MIN_RESET_INTERVAL_SECONDS, help="วินาทีขั้นต่ำระหว่าง reset (default from config)")
+    parser.add_argument("--lookback",     type=int,   default=config.LOOKBACK_BARS,            help="จำนวน bars สำหรับคำนวณ range")
+    parser.add_argument("--confirm-bars", type=int,   default=config.TREND_CONFIRM_BARS,       help="จำนวน bars ยืนยัน trend ก่อน reset")
+    parser.add_argument("--signal-mode",  type=str,   default=config.SIGNAL_MODE,              help="โหมด signal: ema หรือ cdc")
+    parser.add_argument("--cdc-fast",     type=int,   default=config.CDC_FAST,                 help="CDC fast EMA period (default 12)")
+    parser.add_argument("--cdc-slow",     type=int,   default=config.CDC_SLOW,                 help="CDC slow EMA period (default 26)")
+    parser.add_argument("--cdc-strict",   action="store_true", default=config.CDC_STRICT,      help="CDC strict: BULL=zone1 เท่านั้น (default)")
+    parser.add_argument("--save",         action="store_true",                                  help="บันทึกผลลง backtest_result.json")
     args = parser.parse_args()
 
     capital = args.grids * args.usdt
@@ -323,13 +339,17 @@ if __name__ == "__main__":
         ema_long=config.EMA_LONG,
         rsi_period=config.RSI_PERIOD,
         ema_min_gap_pct=config.EMA_MIN_GAP_PCT,
-        trend_confirm_bars=config.TREND_CONFIRM_BARS,
-        min_reset_interval=config.MIN_RESET_INTERVAL_SECONDS,
-        lookback_bars=config.LOOKBACK_BARS,
+        trend_confirm_bars=args.confirm_bars,
+        min_reset_interval=args.min_reset,
+        lookback_bars=args.lookback,
         buffer_pct=config.BUFFER_PCT,
         stop_loss_pct=args.sl,
         grid_mode=config.GRID_MODE,
         fee_rate=fee_rate,
+        signal_mode=args.signal_mode,
+        cdc_fast=args.cdc_fast,
+        cdc_slow=args.cdc_slow,
+        cdc_strict=args.cdc_strict,
     )
 
     print_report(result, capital, fee_rate)
