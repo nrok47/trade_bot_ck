@@ -487,6 +487,11 @@ def run() -> None:
 
     # ── โหลด state เก่า (ถ้ามี) ──────────────────────────────────────────────
     saved = state_manager.load_state()
+    # Turbo mode ไม่ใช้ saved state — เริ่มใหม่ทุกครั้ง
+    if saved and config.TURBO_MODE:
+        console.print("[yellow]⚡ Turbo mode — ไม่โหลด state เก่า เริ่มใหม่[/yellow]")
+        saved = None
+
     if saved:
         from grid import GridDirection as _GD
         from range_manager import GridRange as _GR
@@ -511,8 +516,8 @@ def run() -> None:
             saved = None
 
     if not saved:
-        if session_mode:
-            # Session mode: เริ่มทันทีในโหมด BOTH ไม่ต้องรอ trend confirm
+        if session_mode or config.TURBO_MODE:
+            # Session/Turbo: เริ่มทันทีในโหมด BOTH — fills ทั้งสองทางเลย
             current_direction = GridDirection.BOTH
         else:
             current_direction = _signal_to_direction(sig)
