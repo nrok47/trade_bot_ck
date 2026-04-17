@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -40,11 +41,20 @@ class FuturesInfo:
 
 class BinanceClient:
     def __init__(self) -> None:
+        requests_params = {}
+        if config.PROXY_URL:
+            requests_params["proxies"] = {
+                "http": config.PROXY_URL,
+                "https": config.PROXY_URL,
+            }
+            logger.info("Using proxy: %s", config.PROXY_URL)
         if config.API_KEY and config.API_SECRET:
-            self._client = Client(config.API_KEY, config.API_SECRET)
+            self._client = Client(config.API_KEY, config.API_SECRET,
+                                  requests_params=requests_params)
         else:
-            self._client = Client()
+            self._client = Client(requests_params=requests_params)
         self._symbol_info: Optional[SymbolInfo] = None
+        self._last_price: float = 0.0
 
     # ── Symbol metadata ───────────────────────────────────────────────────────
 
@@ -94,11 +104,30 @@ class BinanceClient:
     # ── Price ─────────────────────────────────────────────────────────────────
 
     def get_price(self) -> float:
-        if config.is_futures:
-            ticker = self._client.futures_symbol_ticker(symbol=config.SYMBOL)
-        else:
-            ticker = self._client.get_symbol_ticker(symbol=config.SYMBOL)
-        return float(ticker["price"])
+        for attempt in range(3):
+            try:
+                if config.is_futures:
+                    ticker = self._client.futures_symbol_ticker(symbol=config.SYMBOL)
+                else:
+                    ticker = self._client.get_symbol_ticker(symbol=config.SYMBOL)
+                self._last_price = float(ticker["price"])
+                return self._last_price
+            except BinanceAPIException as exc:
+                if "restricted location" in str(exc):
+                    logger.error(
+                        "Binance บล็อก IP นี้ (restricted location) — "
+                        "ต้องตั้งค่า PROXY_URL ใน .env  attempt=%d/3", attempt + 1
+                    )
+                    if attempt < 2:
+                        time.sleep(5)
+                    else:
+                        if self._last_price:
+                            logger.warning("ใช้ราคาล่าสุด $%.4f แทน", self._last_price)
+                            return self._last_price
+                        raise
+                else:
+                    raise
+        return self._last_price
 
     # ── Balance ───────────────────────────────────────────────────────────────
 

@@ -90,6 +90,10 @@ class Config:
     # หยุดบอทเมื่อราคาหลุดกรอบออกไป % นี้ (ค่าเริ่มต้น 5%)
     AUTO_STOP_PCT: float = float(os.getenv("AUTO_STOP_PCT", "5.0"))
 
+    # ── Proxy (ใช้เมื่อ Binance บล็อก IP ของ server) ─────────────────────────
+    # ตัวอย่าง: http://user:pass@host:port  หรือ  socks5://host:port
+    PROXY_URL: str = os.getenv("PROXY_URL", "")
+
     # ── Telegram Notifications ────────────────────────────────────────────────
     # ดู README หรือ .env.example สำหรับวิธีหา token และ chat_id
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
