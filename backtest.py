@@ -338,7 +338,7 @@ if __name__ == "__main__":
     parser.add_argument("--signal-mode",  type=str,   default=config.SIGNAL_MODE,              help="โหมด signal: ema หรือ cdc")
     parser.add_argument("--cdc-fast",     type=int,   default=config.CDC_FAST,                 help="CDC fast EMA period (default 12)")
     parser.add_argument("--cdc-slow",     type=int,   default=config.CDC_SLOW,                 help="CDC slow EMA period (default 26)")
-    parser.add_argument("--cdc-strict",   action=argparse.BooleanOptionalAction, default=config.CDC_STRICT, help="--cdc-strict=BULL zone1 only | --no-cdc-strict=zones1-3 BULL")
+    parser.add_argument("--cdc-strict",   type=int, choices=[0, 1], default=int(config.CDC_STRICT), help="1=strict BULL zone1 only (default), 0=aggressive zones1-3 BULL")
     parser.add_argument("--save",         action="store_true",                                  help="บันทึกผลลง backtest_result.json")
     args = parser.parse_args()
 
@@ -366,7 +366,7 @@ if __name__ == "__main__":
         signal_mode=args.signal_mode,
         cdc_fast=args.cdc_fast,
         cdc_slow=args.cdc_slow,
-        cdc_strict=args.cdc_strict,
+        cdc_strict=bool(args.cdc_strict),
     )
 
     print_report(result, capital, fee_rate)
