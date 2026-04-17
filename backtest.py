@@ -67,11 +67,16 @@ class BTResult:
     buy_fills: int = 0
     sell_fills: int = 0
     realized_profit: float = 0.0
+    total_fees: float = 0.0
     max_drawdown: float = 0.0
     peak_profit: float = 0.0
     resets: int = 0
     pnl_series: list[float] = field(default_factory=list)
     fill_log: list[dict] = field(default_factory=list)
+
+    @property
+    def net_profit(self) -> float:
+        return self.realized_profit - self.total_fees
 
 
 def _calc_range(closes: list, highs: list, lows: list,
@@ -98,6 +103,7 @@ def run_backtest(
     buffer_pct: float,
     stop_loss_pct: float,
     grid_mode: str,
+    fee_rate: float = 0.0002,
 ) -> BTResult:
     print(f"\n📊 Backtest: {symbol} | TF={interval} | {days}d | {grid_count} grids")
     print("กำลังดึงข้อมูลจาก Binance...")
@@ -189,6 +195,8 @@ def run_backtest(
             if filled:
                 o.status = "FILLED"
                 result.total_fills += 1
+                fee = o.price * o.qty * fee_rate
+                result.total_fees += fee
                 if o.side == "BUY":
                     result.buy_fills += 1
                     # Place SELL at next level
@@ -202,24 +210,25 @@ def run_backtest(
                     buy_price = levels[o.level - 1] if o.level > 0 else o.price
                     profit = (o.price - buy_price) * o.qty
                     result.realized_profit += profit
+                    net_total = result.realized_profit - result.total_fees
                     result.fill_log.append({
                         "ts": time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)),
                         "price": o.price,
                         "profit": round(profit, 4),
-                        "total": round(result.realized_profit, 4),
+                        "net_total": round(net_total, 4),
                     })
                     # Re-place BUY
                     if current_direction in ("LONG", "BOTH"):
                         orders.append(BTOrder(price=buy_price, side="BUY",
                                               qty=o.qty, level=o.level - 1))
 
-        # ── Track drawdown (realized + unrealized mark-to-market) ────────────
+        # ── Track drawdown (net: realized - fees + unrealized mark-to-market) ──
         unrealized = sum(
-            (price - o.cost_basis) * o.qty
+            (price - o.cost_basis) * o.qty - price * o.qty * fee_rate
             for o in orders
             if o.side == "SELL" and o.status == "OPEN" and o.cost_basis is not None
         )
-        equity = result.realized_profit + unrealized
+        equity = result.net_profit + unrealized
         result.pnl_series.append(round(equity, 4))
         if equity > result.peak_profit:
             result.peak_profit = equity
@@ -232,23 +241,27 @@ def run_backtest(
 
 # ── Report ────────────────────────────────────────────────────────────────────
 
-def print_report(result: BTResult, capital: float) -> None:
-    pnl_pct = result.realized_profit / capital * 100 if capital else 0
-    dd_pct  = result.max_drawdown   / capital * 100 if capital else 0
-    win_rate = (result.sell_fills / result.total_fills * 100) if result.total_fills else 0
+def print_report(result: BTResult, capital: float, fee_rate: float = 0.0002) -> None:
+    gross_pct = result.realized_profit / capital * 100 if capital else 0
+    net_pct   = result.net_profit      / capital * 100 if capital else 0
+    dd_pct    = result.max_drawdown    / capital * 100 if capital else 0
+    win_rate  = (result.sell_fills / result.total_fills * 100) if result.total_fills else 0
+    fee_pct   = fee_rate * 100
 
     print("\n" + "="*55)
     print(f"{'BACKTEST RESULT':^55}")
     print("="*55)
     print(f"  Fills รวม    : {result.total_fills:>6}  (BUY={result.buy_fills} SELL={result.sell_fills})")
     print(f"  Resets       : {result.resets:>6}")
-    print(f"  กำไรสุทธิ    : {'+'if result.realized_profit>=0 else ''}${result.realized_profit:.4f}  ({pnl_pct:+.2f}%)")
+    print(f"  กำไรก่อนหัก  : {'+'if result.realized_profit>=0 else ''}${result.realized_profit:.4f}  ({gross_pct:+.2f}%)")
+    print(f"  ค่าธรรมเนียม : -${result.total_fees:.4f}  ({fee_pct:.2f}%/fill × {result.total_fills} fills)")
+    print(f"  กำไรสุทธิ    : {'+'if result.net_profit>=0 else ''}${result.net_profit:.4f}  ({net_pct:+.2f}%)")
     print(f"  Max Drawdown : -${result.max_drawdown:.4f}  (-{dd_pct:.2f}%)")
     print(f"  Win rate     : {win_rate:.1f}%")
 
-    # ASCII P&L chart
+    # ASCII P&L chart (net equity)
     if result.pnl_series:
-        print("\n  P&L Chart:")
+        print("\n  P&L Chart (net):")
         _print_ascii_chart(result.pnl_series)
 
     # Last 10 fills
@@ -257,7 +270,7 @@ def print_report(result: BTResult, capital: float) -> None:
         for f in result.fill_log[-10:]:
             sign = "+" if f["profit"] >= 0 else ""
             print(f"    {f['ts']}  SELL @${f['price']:.4f}"
-                  f"  {sign}${f['profit']:.4f}  total=${f['total']:.4f}")
+                  f"  {sign}${f['profit']:.4f}  net_total=${f['net_total']:.4f}")
     print("="*55)
 
 
@@ -292,10 +305,12 @@ if __name__ == "__main__":
     parser.add_argument("--grids",   type=int,   default=config.GRID_COUNT)
     parser.add_argument("--usdt",    type=float, default=config.USDT_PER_GRID)
     parser.add_argument("--sl",      type=float, default=config.STOP_LOSS_PCT, help="Stop loss pct (0=ปิด)")
+    parser.add_argument("--fee",     type=float, default=0.02, help="ค่าธรรมเนียม pct/fill (default 0.02 = maker)")
     parser.add_argument("--save",    action="store_true", help="บันทึกผลลง backtest_result.json")
     args = parser.parse_args()
 
     capital = args.grids * args.usdt
+    fee_rate = args.fee / 100
 
     result = run_backtest(
         symbol=args.symbol,
@@ -314,16 +329,19 @@ if __name__ == "__main__":
         buffer_pct=config.BUFFER_PCT,
         stop_loss_pct=args.sl,
         grid_mode=config.GRID_MODE,
+        fee_rate=fee_rate,
     )
 
-    print_report(result, capital)
+    print_report(result, capital, fee_rate)
 
     if args.save:
         out = {
             "symbol": args.symbol, "tf": args.tf, "days": args.days,
             "capital": capital, "fills": result.total_fills,
-            "profit": round(result.realized_profit, 4),
-            "profit_pct": round(result.realized_profit / capital * 100, 2) if capital else 0,
+            "gross_profit": round(result.realized_profit, 4),
+            "total_fees": round(result.total_fees, 4),
+            "net_profit": round(result.net_profit, 4),
+            "net_profit_pct": round(result.net_profit / capital * 100, 2) if capital else 0,
             "max_drawdown": round(result.max_drawdown, 4),
             "resets": result.resets,
             "fill_log": result.fill_log,
