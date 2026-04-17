@@ -15,6 +15,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import logging
 import signal
 import sys
@@ -315,6 +316,9 @@ def _compute_new_range(current_price: float, old_range: GridRange) -> GridRange:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run() -> None:
+    session_start = time.time()
+    session_mode = config.SESSION_DURATION_MINUTES > 0
+
     try:
         config.validate()
     except (ValueError, EnvironmentError) as exc:
@@ -325,6 +329,16 @@ def run() -> None:
         f"FUTURES {config.LEVERAGE}x ({config.MARGIN_TYPE})"
         if config.is_futures else "SPOT"
     )
+
+    if session_mode:
+        console.print(Panel(
+            f"[bold cyan]Session Mode: {config.SESSION_DURATION_MINUTES} นาที[/bold cyan]\n\n"
+            "บอทจะ [bold]เริ่มทันที ในโหมด BOTH[/bold] — เปิด grid สองทางเลย ไม่รอ trend signal\n"
+            f"หยุดอัตโนมัติหลัง [cyan]{config.SESSION_DURATION_MINUTES}[/cyan] นาที พร้อมสรุปผล\n\n"
+            "เหมาะสำหรับเทรดช่วงสั้น 20 นาที – 2 ชั่วโมง\n"
+            "ใช้ --session N เพื่อกำหนดเวลา  หรือตั้ง SESSION_DURATION_MINUTES ใน .env",
+            title="Session Mode", border_style="cyan",
+        ))
 
     if config.DRY_RUN:
         console.print(Panel(
@@ -477,7 +491,11 @@ def run() -> None:
             saved = None
 
     if not saved:
-        current_direction = _signal_to_direction(sig)
+        if session_mode:
+            # Session mode: เริ่มทันทีในโหมด BOTH ไม่ต้องรอ trend confirm
+            current_direction = GridDirection.BOTH
+        else:
+            current_direction = _signal_to_direction(sig)
         engine.initialize(current_price, current_direction)
         regrid_count = 0
 
@@ -496,6 +514,17 @@ def run() -> None:
         while _running:
             cycle += 1
             current_price = binance.get_price()
+
+            # ── Session timer ─────────────────────────────────────────────────
+            if session_mode:
+                elapsed_min = (time.time() - session_start) / 60
+                if elapsed_min >= config.SESSION_DURATION_MINUTES:
+                    logger.info("Session ครบ %.0f นาที — หยุดบอท", config.SESSION_DURATION_MINUTES)
+                    console.print(
+                        f"\n[bold cyan]Session ครบ {config.SESSION_DURATION_MINUTES} นาที "
+                        f"(จริง {elapsed_min:.1f} นาที) — หยุดบอทอัตโนมัติ[/bold cyan]"
+                    )
+                    break
 
             # ── Reset daily P&L at midnight ───────────────────────────────────
             today = time.strftime("%Y-%m-%d")
@@ -730,8 +759,16 @@ def run() -> None:
     d_color = "green" if day_pct >= 0 else "red"
     dsign = "+" if day_pct >= 0 else ""
     tsign = "+" if tot_pct >= 0 else ""
+    elapsed_min = (time.time() - session_start) / 60
+    session_line = (
+        f"Session   : [cyan]{elapsed_min:.1f} นาที[/cyan] / {config.SESSION_DURATION_MINUTES} นาที\n"
+        if session_mode else ""
+    )
+    title_str = "สรุป Session" if session_mode else "จบการทำงาน"
+    border_str = "cyan" if session_mode else "yellow"
     console.print(Panel(
         f"[bold]สรุปผล[/bold]\n\n"
+        f"{session_line}"
         f"Market    : {market_label}\n"
         f"Timeframe : {config.TIMEFRAME}\n"
         f"Cycles    : {cycle}   Resets: {s.resets}   Re-grids: {regrid_count}\n"
@@ -739,9 +776,17 @@ def run() -> None:
         f"วันนี้    : [{d_color}]{dsign}{day_pct:.2f}%  ({dsign}${s.daily_profit_usdt:.4f} USDT)[/{d_color}]\n"
         f"รวมทั้งหมด: [bold {p_color}]{tsign}{tot_pct:.2f}%  ({tsign}${s.realized_profit_usdt:.4f} USDT)[/bold {p_color}]\n"
         f"Runtime   : {s.runtime_hours:.2f}h",
-        title="จบการทำงาน", border_style="yellow",
+        title=title_str, border_style=border_str,
     ))
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Binance Trend-Following Grid Bot")
+    parser.add_argument(
+        "--session", type=int, default=0, metavar="MINUTES",
+        help="Session mode: หยุดอัตโนมัติหลัง N นาที (0 = ไม่จำกัด)",
+    )
+    args = parser.parse_args()
+    if args.session > 0:
+        config.SESSION_DURATION_MINUTES = args.session
     run()

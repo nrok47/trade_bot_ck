@@ -103,6 +103,11 @@ class Config:
     DRY_RUN: bool = (os.getenv("DRY_RUN", "true") or "true").lower() != "false"
     POLL_INTERVAL_SECONDS: float = _float("POLL_INTERVAL_SECONDS", "5")
 
+    # ── Session Mode ──────────────────────────────────────────────────────────
+    # 0 = ทำงานไม่จำกัดเวลา (default)
+    # >0 = หยุดอัตโนมัติหลัง N นาที พร้อม summary  (หรือใช้ --session N ตอนรัน)
+    SESSION_DURATION_MINUTES: int = _int("SESSION_DURATION_MINUTES", "0")
+
     # ── Properties ────────────────────────────────────────────────────────────
 
     @property
