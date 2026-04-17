@@ -58,6 +58,7 @@ class BTOrder:
     qty: float
     level: int
     status: str = "OPEN"
+    cost_basis: Optional[float] = None  # BUY fill price, stored on paired SELL order
 
 
 @dataclass
@@ -194,7 +195,8 @@ def run_backtest(
                     if o.level + 1 < len(levels):
                         sell_price = levels[o.level + 1]
                         orders.append(BTOrder(price=sell_price, side="SELL",
-                                              qty=o.qty, level=o.level + 1))
+                                              qty=o.qty, level=o.level + 1,
+                                              cost_basis=o.price))
                 else:  # SELL
                     result.sell_fills += 1
                     buy_price = levels[o.level - 1] if o.level > 0 else o.price
@@ -211,11 +213,17 @@ def run_backtest(
                         orders.append(BTOrder(price=buy_price, side="BUY",
                                               qty=o.qty, level=o.level - 1))
 
-        # ── Track drawdown ────────────────────────────────────────────────────
-        result.pnl_series.append(round(result.realized_profit, 4))
-        if result.realized_profit > result.peak_profit:
-            result.peak_profit = result.realized_profit
-        dd = result.peak_profit - result.realized_profit
+        # ── Track drawdown (realized + unrealized mark-to-market) ────────────
+        unrealized = sum(
+            (price - o.cost_basis) * o.qty
+            for o in orders
+            if o.side == "SELL" and o.status == "OPEN" and o.cost_basis is not None
+        )
+        equity = result.realized_profit + unrealized
+        result.pnl_series.append(round(equity, 4))
+        if equity > result.peak_profit:
+            result.peak_profit = equity
+        dd = result.peak_profit - equity
         if dd > result.max_drawdown:
             result.max_drawdown = dd
 
