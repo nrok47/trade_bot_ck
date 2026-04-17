@@ -145,22 +145,36 @@ class GridEngine:
         if sell_waits:
             logger.info("รอ SELL ที่: %s  (ราคาต้องขึ้นถึง)", " | ".join(sell_waits))
 
-    def reset(self) -> None:
+    def reset(self, soft: bool = False) -> None:
         """
-        ยกเลิก order ทั้งหมด + ปิด open position (Futures) ก่อนล้าง state
-        เรียกเมื่อ trend เปลี่ยน เพื่อป้องกัน position ค้างในทิศตรงข้าม
-        """
-        logger.info("Grid reset (trend change)  resets=%d", self.stats.resets + 1)
+        ยกเลิก pending orders + ล้าง state
 
-        # 1) ยกเลิก pending orders ก่อน
+        soft=True  (HOLD_POSITION_ON_RESET=true):
+          - ยกเลิกเฉพาะ order ที่ยังไม่ fill (NEW)
+          - ไม่ force-close position → ให้ position ปิดเองตาม grid ใหม่
+          - ประหยัดค่า taker fee จาก market close order
+
+        soft=False (default):
+          - ยกเลิกทุก order + force-close position ทันที
+          - ปลอดภัยกว่าเมื่อ trend พลิกแรง แต่เสีย fee มากกว่า
+        """
+        logger.info(
+            "Grid reset  resets=%d  mode=%s",
+            self.stats.resets + 1, "soft" if soft else "hard",
+        )
+
+        # 1) ยกเลิก pending orders เสมอ
         for go in list(self.orders.values()):
             if go.status == "NEW":
                 binance.cancel_order(go.order_id)
 
-        # 2) ปิด open position ทันที (Futures เท่านั้น)
-        #    ถ้าไม่ทำ: Long ค้างอยู่ แต่ trend เปลี่ยนเป็น Bear → ขาดทุนต่อ
-        if config.is_futures:
+        # 2) ปิด position: hard reset เท่านั้น
+        if not soft and config.is_futures:
             binance.close_all_positions()
+        elif soft and config.is_futures:
+            logger.info(
+                "Soft reset: คง position ไว้ — จะปิดเองเมื่อราคาถึง grid ใหม่"
+            )
 
         self.orders.clear()
         self.stats.resets += 1

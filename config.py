@@ -56,6 +56,12 @@ class Config:
     #   ปิดโดย default — เปิดเฉพาะเมื่อเข้าใจความเสี่ยงแล้ว
     AUTO_REGRID: bool = os.getenv("AUTO_REGRID", "false").lower() == "true"
 
+    # HOLD_POSITION_ON_RESET=true → เมื่อ trend เปลี่ยน ยกเลิกเฉพาะ pending orders
+    #   แต่ไม่ force-close position ด้วย market order → ประหยัด taker fee
+    #   position จะปิดเองเมื่อราคาถึง grid ใหม่ (ช้ากว่า แต่ถูกกว่า)
+    #   ⚠ ความเสี่ยง: ถ้า trend พลิกแรง position เก่าอาจขาดทุนเพิ่มก่อนปิด
+    HOLD_POSITION_ON_RESET: bool = os.getenv("HOLD_POSITION_ON_RESET", "false").lower() == "true"
+
     # เปอร์เซ็นต์โซนขอบที่ trigger re-grid (0.0–0.5)
     # 0.25 = trigger เมื่อราคาอยู่ใน top/bottom 25% ของกรอบ
     # ต่ำกว่า = re-grid บ่อยกว่า  สูงกว่า = รอนานกว่า (แนะนำ 0.20–0.30)

@@ -575,12 +575,13 @@ def run() -> None:
 
             if engine._initialized and new_direction != current_direction:
                 if strategy.can_reset_now():
+                    soft = config.HOLD_POSITION_ON_RESET and config.is_futures
                     logger.info(
-                        "🔄 Trend เปลี่ยน: %s → %s | ราคา $%.4f"
-                        " | ยกเลิก orders เก่า รีเซ็ต grid ใหม่",
+                        "🔄 Trend เปลี่ยน: %s → %s | ราคา $%.4f | reset=%s",
                         current_direction.value, new_direction.value, current_price,
+                        "soft" if soft else "hard",
                     )
-                    engine.reset()
+                    engine.reset(soft=soft)
                     strategy.mark_reset()
                     current_direction = new_direction
                     _last_cooldown_direction = ""
