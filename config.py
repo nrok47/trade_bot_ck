@@ -108,6 +108,13 @@ class Config:
     # >0 = หยุดอัตโนมัติหลัง N นาที พร้อม summary  (หรือใช้ --session N ตอนรัน)
     SESSION_DURATION_MINUTES: int = _int("SESSION_DURATION_MINUTES", "0")
 
+    # ── Turbo Mode ────────────────────────────────────────────────────────────
+    # เพิ่มความเสี่ยง/ความถี่สูงสุด: TF สั้น + ตัดสินใจก้าวร้าว + react ทันที
+    # ใช้ --turbo ตอนรัน หรือตั้ง TURBO_MODE=true ใน .env
+    TURBO_MODE: bool = (os.getenv("TURBO_MODE", "false") or "false").lower() == "true"
+    # TF ที่จะใช้ใน turbo mode (1m หรือ 3m แนะนำ)
+    TURBO_TIMEFRAME: str = os.getenv("TURBO_TIMEFRAME", "3m") or "3m"
+
     # ── Properties ────────────────────────────────────────────────────────────
 
     @property

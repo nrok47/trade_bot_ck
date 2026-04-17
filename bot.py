@@ -104,7 +104,8 @@ def _trend_panel(sig: TrendSignal) -> Panel:
                  border_style=border)
 
 
-def _header_panel(current_price: float, cycle: int, direction: GridDirection) -> Panel:
+def _header_panel(current_price: float, cycle: int, direction: GridDirection,
+                   session_start: float = 0.0, session_mode: bool = False) -> Panel:
     mode_str = "[bold red]LIVE[/bold red]" if not config.DRY_RUN else "[bold yellow]DRY RUN[/bold yellow]"
     market_str = (
         f"[magenta]FUTURES {config.LEVERAGE}x ({config.MARGIN_TYPE})[/magenta]"
@@ -114,12 +115,18 @@ def _header_panel(current_price: float, cycle: int, direction: GridDirection) ->
     dir_labels = {GridDirection.LONG: "▲ LONG", GridDirection.SHORT: "▼ SHORT", GridDirection.BOTH: "◆ BOTH"}
     d_color = dir_colors.get(direction, "white")
     d_label = dir_labels.get(direction, str(direction))
+    extras = ""
+    if config.TURBO_MODE:
+        extras += "   [bold red]⚡TURBO[/bold red]"
+    if session_mode:
+        remaining = max(0.0, config.SESSION_DURATION_MINUTES - (time.time() - session_start) / 60)
+        extras += f"   [cyan]Session: {remaining:.0f}m เหลือ[/cyan]"
     content = (
         f"Mode: {mode_str}   Market: {market_str}   "
         f"Grid: [bold {d_color}]{d_label}[/bold {d_color}]   "
         f"Symbol: [bold]{config.SYMBOL}[/bold]   "
         f"ราคา: [bold green]${current_price:,.4f}[/bold green]   "
-        f"Cycle: {cycle}"
+        f"Cycle: {cycle}{extras}"
     )
     return Panel(content, title="[bold]Binance Trend Grid Bot[/bold]", border_style="blue")
 
@@ -329,6 +336,19 @@ def run() -> None:
         f"FUTURES {config.LEVERAGE}x ({config.MARGIN_TYPE})"
         if config.is_futures else "SPOT"
     )
+
+    if config.TURBO_MODE:
+        console.print(Panel(
+            f"[bold red]⚡ TURBO MODE[/bold red]\n\n"
+            f"TF           : [bold red]{config.TIMEFRAME}[/bold red]  (สั้นที่สุด = ตัดสินใจถี่ขึ้น)\n"
+            f"Signal       : CDC non-strict  (BULL=zones1-3 / BEAR=zones4-6 / ไม่มี NEUTRAL)\n"
+            f"Confirm bars : 1  (react ทันทีทุก bar ไม่รอ confirm)\n"
+            f"Min reset    : 60s  (reset ได้เร็วขึ้น)\n"
+            f"Lookback     : {config.LOOKBACK_BARS} bars ≈ 24h\n\n"
+            "[yellow]⚠  Turbo เพิ่มทั้งโอกาสกำไร และความเสี่ยง — resets จะถี่มากขึ้น "
+            "ค่า fee สะสมได้เร็วกว่า[/yellow]",
+            title="⚡ Turbo Mode", border_style="red",
+        ))
 
     if session_mode:
         console.print(Panel(
@@ -703,7 +723,7 @@ def run() -> None:
             layout = Layout()
             if config.is_futures:
                 layout.split_column(
-                    Layout(_header_panel(current_price, cycle, current_direction), size=3),
+                    Layout(_header_panel(current_price, cycle, current_direction, session_start, session_mode), size=3),
                     Layout(name="row1", size=9),
                     Layout(name="row2", size=9),
                     Layout(_grid_table(engine, current_price), name="grid"),
@@ -719,7 +739,7 @@ def run() -> None:
                 )
             else:
                 layout.split_column(
-                    Layout(_header_panel(current_price, cycle, current_direction), size=3),
+                    Layout(_header_panel(current_price, cycle, current_direction, session_start, session_mode), size=3),
                     Layout(name="row1", size=9),
                     Layout(name="row2", size=7),
                     Layout(_grid_table(engine, current_price), name="grid"),
@@ -786,7 +806,29 @@ if __name__ == "__main__":
         "--session", type=int, default=0, metavar="MINUTES",
         help="Session mode: หยุดอัตโนมัติหลัง N นาที (0 = ไม่จำกัด)",
     )
+    parser.add_argument(
+        "--turbo", action="store_true",
+        help=(
+            "Turbo mode: TF สั้น + ตัดสินใจก้าวร้าว "
+            "(CDC non-strict, confirm-bars=1, min-reset=60s)"
+        ),
+    )
+    parser.add_argument(
+        "--turbo-tf", default=None, metavar="TF",
+        help="Timeframe ที่จะใช้ใน turbo mode (default: 3m)",
+    )
     args = parser.parse_args()
     if args.session > 0:
         config.SESSION_DURATION_MINUTES = args.session
+    if args.turbo or config.TURBO_MODE:
+        config.TURBO_MODE = True
+        tf = args.turbo_tf or config.TURBO_TIMEFRAME
+        config.TIMEFRAME = tf
+        config.TREND_CONFIRM_BARS = 1
+        config.MIN_RESET_INTERVAL_SECONDS = 60.0
+        config.CDC_STRICT = False     # BULL=zones1-3, BEAR=zones4-6 ไม่มี NEUTRAL
+        config.SIGNAL_MODE = "cdc"    # CDC ตอบสนองเร็วกว่า EMA
+        # Lookback ปรับตาม TF ใหม่ให้ครอบ 24h
+        _tf_secs = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800}
+        config.LOOKBACK_BARS = max(48, int(86400 / _tf_secs.get(tf, 180)))
     run()
