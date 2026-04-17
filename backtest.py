@@ -145,6 +145,8 @@ def run_backtest(
     confirmed_dir_queue: list[str] = []
     confirmed_direction = "NEUTRAL"
     last_upper = last_lower = 0.0
+    _running_peak = 0.0          # peak equity ณ ปัจจุบัน (สำหรับคำนวณ DD)
+    _running_peak_at = ""        # timestamp ของ peak ปัจจุบัน
 
     warmup = max(ema_long + 5, lookback_bars + 5, 30)
 
@@ -259,13 +261,16 @@ def run_backtest(
         equity = result.net_profit + unrealized
         result.pnl_series.append(round(equity, 4))
         ts_label = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+        if equity > _running_peak:
+            _running_peak = equity
+            _running_peak_at = ts_label
         if equity > result.peak_profit:
             result.peak_profit = equity
-            result.peak_profit_at = ts_label
-        dd = result.peak_profit - equity
+        dd = _running_peak - equity
         if dd > result.max_drawdown:
             result.max_drawdown = dd
             result.max_drawdown_at = ts_label
+            result.peak_profit_at = _running_peak_at  # snapshot peak ก่อน DD นี้
 
     return result
 
