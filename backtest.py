@@ -338,7 +338,7 @@ if __name__ == "__main__":
     parser.add_argument("--signal-mode",  type=str,   default=config.SIGNAL_MODE,              help="โหมด signal: ema หรือ cdc")
     parser.add_argument("--cdc-fast",     type=int,   default=config.CDC_FAST,                 help="CDC fast EMA period (default 12)")
     parser.add_argument("--cdc-slow",     type=int,   default=config.CDC_SLOW,                 help="CDC slow EMA period (default 26)")
-    parser.add_argument("--cdc-strict",   action="store_true", default=config.CDC_STRICT,      help="CDC strict: BULL=zone1 เท่านั้น (default)")
+    parser.add_argument("--cdc-strict",   action=argparse.BooleanOptionalAction, default=config.CDC_STRICT, help="--cdc-strict=BULL zone1 only | --no-cdc-strict=zones1-3 BULL")
     parser.add_argument("--save",         action="store_true",                                  help="บันทึกผลลง backtest_result.json")
     args = parser.parse_args()
 
