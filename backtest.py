@@ -87,7 +87,9 @@ class BTResult:
     realized_profit: float = 0.0
     total_fees: float = 0.0
     max_drawdown: float = 0.0
+    max_drawdown_at: str = ""   # timestamp ที่เกิด max drawdown
     peak_profit: float = 0.0
+    peak_profit_at: str = ""    # timestamp ที่ equity พุ่งสูงสุดก่อน drawdown
     resets: int = 0
     pnl_series: list[float] = field(default_factory=list)
     fill_log: list[dict] = field(default_factory=list)
@@ -256,11 +258,14 @@ def run_backtest(
         )
         equity = result.net_profit + unrealized
         result.pnl_series.append(round(equity, 4))
+        ts_label = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
         if equity > result.peak_profit:
             result.peak_profit = equity
+            result.peak_profit_at = ts_label
         dd = result.peak_profit - equity
         if dd > result.max_drawdown:
             result.max_drawdown = dd
+            result.max_drawdown_at = ts_label
 
     return result
 
@@ -282,7 +287,7 @@ def print_report(result: BTResult, capital: float, fee_rate: float = 0.0002) -> 
     print(f"  กำไรก่อนหัก  : {'+'if result.realized_profit>=0 else ''}${result.realized_profit:.4f}  ({gross_pct:+.2f}%)")
     print(f"  ค่าธรรมเนียม : -${result.total_fees:.4f}  ({fee_pct:.2f}%/fill × {result.total_fills} fills)")
     print(f"  กำไรสุทธิ    : {'+'if result.net_profit>=0 else ''}${result.net_profit:.4f}  ({net_pct:+.2f}%)")
-    print(f"  Max Drawdown : -${result.max_drawdown:.4f}  (-{dd_pct:.2f}%)")
+    print(f"  Max Drawdown : -${result.max_drawdown:.4f}  (-{dd_pct:.2f}%)  @ {result.max_drawdown_at}  (peak: {result.peak_profit_at})")
     print(f"  Win rate     : {win_rate:.1f}%")
 
     # ASCII P&L chart (net equity)
@@ -380,6 +385,8 @@ if __name__ == "__main__":
             "net_profit": round(result.net_profit, 4),
             "net_profit_pct": round(result.net_profit / capital * 100, 2) if capital else 0,
             "max_drawdown": round(result.max_drawdown, 4),
+            "max_drawdown_at": result.max_drawdown_at,
+            "peak_profit_at": result.peak_profit_at,
             "resets": result.resets,
             "fill_log": result.fill_log,
         }
