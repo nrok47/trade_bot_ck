@@ -88,27 +88,49 @@ def _signal_to_direction(sig: TrendSignal) -> GridDirection:
 def _trend_panel(sig: TrendSignal) -> Panel:
     dir_color = {"BULL": "green", "BEAR": "red", "NEUTRAL": "yellow"}
     color = dir_color.get(sig.direction, "white")
-    bull_color = "green" if sig.bull_power > 0 else "red"
-    bear_color = "red" if sig.bear_power < 0 else "green"
     raw_dir = strategy.raw_direction
     raw_color = dir_color.get(raw_dir, "white")
     confirm_bar = strategy.confirm_progress
-    lines = [
-        f"Confirmed: [bold {color}]{sig.label()}[/bold {color}]   "
-        f"Strength: {'█' * int(sig.strength * 5)}{'░' * (5 - int(sig.strength * 5))} {sig.strength*100:.0f}%",
-        f"Raw bar  : [{raw_color}]{raw_dir}[/{raw_color}]   "
-        f"Confirm: {confirm_bar} ({config.TREND_CONFIRM_BARS} bars needed)",
-        f"EMA{config.EMA_SHORT:<2}    : {sig.ema_short:.4f}",
-        f"EMA{config.EMA_LONG:<2}    : {sig.ema_long:.4f}",
-        f"RSI({config.RSI_PERIOD})  : {sig.rsi_value:.1f}"
-        + (" [red](overbought)[/red]" if sig.rsi_value > 70
-           else " [green](oversold)[/green]" if sig.rsi_value < 30 else ""),
-        f"Bull Pwr : [{bull_color}]{sig.bull_power:+.4f}[/{bull_color}]   "
-        f"Bear Pwr: [{bear_color}]{sig.bear_power:+.4f}[/{bear_color}]",
-        f"TF       : [cyan]{config.TIMEFRAME}[/cyan]",
-    ]
+    is_cdc = config.SIGNAL_MODE == "cdc"
+
+    if is_cdc:
+        zone = int(sig.bull_power)  # CDCZone.as_trend_signal() เก็บ zone ไว้ใน bull_power
+        zone_names = {1: "BULL", 2: "WEAK_BULL", 3: "CAUTION",
+                      4: "BEAR", 5: "WEAK_BEAR", 6: "CAUTION_BEAR"}
+        zone_str = zone_names.get(zone, f"Zone{zone}")
+        lines = [
+            f"Confirmed: [bold {color}]{sig.label()}[/bold {color}]   "
+            f"Strength: {'█' * int(sig.strength * 5)}{'░' * (5 - int(sig.strength * 5))} {sig.strength*100:.0f}%",
+            f"Raw bar  : [{raw_color}]{raw_dir}[/{raw_color}]   "
+            f"Confirm: {confirm_bar} ({config.TREND_CONFIRM_BARS} bars needed)",
+            f"CDC Zone : [bold]{zone}[/bold] ({zone_str})   "
+            f"Strict: {'Yes' if config.CDC_STRICT else 'No'}",
+            f"FastEMA({config.CDC_FAST}) : {sig.ema_short:.4f}",
+            f"SlowEMA({config.CDC_SLOW}) : {sig.ema_long:.4f}",
+            f"Mode     : [cyan]CDC {config.CDC_FAST}/{config.CDC_SLOW}[/cyan]   "
+            f"TF: [cyan]{config.TIMEFRAME}[/cyan]",
+        ]
+    else:
+        bull_color = "green" if sig.bull_power > 0 else "red"
+        bear_color = "red" if sig.bear_power < 0 else "green"
+        lines = [
+            f"Confirmed: [bold {color}]{sig.label()}[/bold {color}]   "
+            f"Strength: {'█' * int(sig.strength * 5)}{'░' * (5 - int(sig.strength * 5))} {sig.strength*100:.0f}%",
+            f"Raw bar  : [{raw_color}]{raw_dir}[/{raw_color}]   "
+            f"Confirm: {confirm_bar} ({config.TREND_CONFIRM_BARS} bars needed)",
+            f"EMA{config.EMA_SHORT:<2}    : {sig.ema_short:.4f}",
+            f"EMA{config.EMA_LONG:<2}    : {sig.ema_long:.4f}",
+            f"RSI({config.RSI_PERIOD})  : {sig.rsi_value:.1f}"
+            + (" [red](overbought)[/red]" if sig.rsi_value > 70
+               else " [green](oversold)[/green]" if sig.rsi_value < 30 else ""),
+            f"Bull Pwr : [{bull_color}]{sig.bull_power:+.4f}[/{bull_color}]   "
+            f"Bear Pwr: [{bear_color}]{sig.bear_power:+.4f}[/{bear_color}]",
+            f"TF       : [cyan]{config.TIMEFRAME}[/cyan]",
+        ]
     border = dir_color.get(sig.direction, "white")
-    return Panel("\n".join(lines), title=f"[bold]Trend Signal ({config.TIMEFRAME})[/bold]",
+    mode_label = f"CDC {config.CDC_FAST}/{config.CDC_SLOW}" if is_cdc else f"EMA {config.EMA_SHORT}/{config.EMA_LONG}"
+    return Panel("\n".join(lines),
+                 title=f"[bold]Trend Signal ({config.TIMEFRAME}) — {mode_label}[/bold]",
                  border_style=border)
 
 
@@ -505,14 +527,25 @@ def run() -> None:
         from range_manager import GridRange as _GR
         try:
             _saved_dir = _GD(saved["direction"])
-            _saved_range = _GR(
-                upper=saved["grid_range"]["upper"],
-                lower=saved["grid_range"]["lower"],
-                strategy_used=saved["grid_range"].get("strategy_used", "Restored"),
-                atr_value=saved["grid_range"].get("atr_value", 0.0),
-            )
-            config.UPPER_PRICE = _saved_range.upper
-            config.LOWER_PRICE = _saved_range.lower
+
+            # ถ้า AUTO_RANGE=true → คำนวณ range ใหม่ตาม strategy ปัจจุบัน (ไม่ใช้ range เก่า)
+            # ถ้า AUTO_RANGE=false → ใช้ range จาก saved state เดิม
+            if config.AUTO_RANGE and config.RANGE_STRATEGY != "manual" and grid_range is not None:
+                _saved_range = grid_range  # ใช้ range ที่คำนวณใหม่ด้านบนแล้ว
+                console.print(
+                    f"[cyan]AUTO_RANGE: ใช้กรอบใหม่ ({config.RANGE_STRATEGY})"
+                    f" ${_saved_range.lower:.4f}–${_saved_range.upper:.4f}[/cyan]"
+                )
+            else:
+                _saved_range = _GR(
+                    upper=saved["grid_range"]["upper"],
+                    lower=saved["grid_range"]["lower"],
+                    strategy_used=saved["grid_range"].get("strategy_used", "Restored"),
+                    atr_value=saved["grid_range"].get("atr_value", 0.0),
+                )
+                config.UPPER_PRICE = _saved_range.upper
+                config.LOWER_PRICE = _saved_range.lower
+
             engine.levels = engine._compute_levels()
             state_manager.restore_engine(engine, saved)
             current_direction = _saved_dir
