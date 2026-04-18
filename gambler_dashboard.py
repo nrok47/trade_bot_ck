@@ -30,7 +30,8 @@ BASE_DIR      = Path(__file__).parent
 STATE_FILE    = BASE_DIR / "gambler_state.json"
 LIVE_FILE     = BASE_DIR / "gambler_live.json"
 LOG_FILE      = BASE_DIR / "gambler_bot.log"
-COPILOT_FILE  = BASE_DIR / "gambler_copilot.json"
+COPILOT_FILE   = BASE_DIR / "gambler_copilot.json"
+SETTINGS_FILE  = BASE_DIR / "gambler_settings.json"
 
 app = Flask(__name__)
 
@@ -86,6 +87,27 @@ _STYLE = """
   .btn-toggle:hover{opacity:.8}
   .btn-on{background:#0f3d20;color:#3fb950;border:1px solid #3fb950}
   .btn-off{background:#3d0f0f;color:#f85149;border:1px solid #f85149}
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;background:#21262d;
+    border-radius:2px;outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    background:#58a6ff;border-radius:50%;cursor:pointer}
+  .srow{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .srow label{color:#8b949e;font-size:12px;min-width:200px;flex-shrink:0}
+  .srow .rval{color:#58a6ff;font-weight:bold;min-width:52px;text-align:right;font-size:13px}
+  .preview-card{background:#0d1117;border:1px solid #30363d;border-radius:6px;
+    padding:12px;text-align:center}
+  .preview-card .pv{font-size:20px;font-weight:bold;line-height:1.2}
+  .preview-card .pl{font-size:11px;color:#8b949e;margin-top:4px}
+  .preview-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:4px}
+  @media(max-width:700px){.preview-grid{grid-template-columns:1fr 1fr}}
+  .balance-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .balance-row label{color:#8b949e;font-size:12px;white-space:nowrap}
+  .balance-row input{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;
+    padding:6px 10px;border-radius:6px;font-family:monospace;width:130px}
+  .cp-range{margin-top:8px;font-size:12px;color:#8b949e;border-top:1px solid #21262d;padding-top:8px}
+  .save-btn{background:#238636;color:#fff;border:none;padding:7px 18px;border-radius:6px;
+    cursor:pointer;font-size:13px;font-family:monospace}
+  .save-btn:hover{background:#2ea043}
 </style>
 """
 
@@ -310,10 +332,125 @@ DASH_TMPL = """<!DOCTYPE html><html>
     {% endif %}
   </div>
 
+  <!-- Position Sizing Settings -->
+  <div class="card">
+    <h3>Position Sizing &amp; Targets
+      <span style="font-size:11px;color:#8b949e;font-weight:normal;margin-left:8px">
+        บันทึกแล้ว bot รับค่าทันที (ยกเว้น Leverage ต้องรีสตาร์ท)
+      </span>
+    </h3>
+
+    <div class="srow">
+      <label>Capital per trade (%)</label>
+      <input type="range" id="s_capital_pct" min="5" max="100" step="5"
+             value="{{ (settings.capital_pct*100)|int }}" oninput="syncVal(this,'v_capital_pct');updatePreview()">
+      <span class="rval"><span id="v_capital_pct">{{ (settings.capital_pct*100)|int }}</span>%</span>
+    </div>
+    <div class="srow">
+      <label>Leverage</label>
+      <input type="range" id="s_leverage" min="1" max="20" step="1"
+             value="{{ settings.leverage }}" oninput="syncVal(this,'v_leverage');updatePreview()">
+      <span class="rval"><span id="v_leverage">{{ settings.leverage }}</span>x</span>
+    </div>
+    <div class="srow">
+      <label>Score threshold (entry)</label>
+      <input type="range" id="s_score_threshold" min="1.0" max="8.0" step="0.5"
+             value="{{ settings.score_threshold }}" oninput="syncVal(this,'v_score_threshold')">
+      <span class="rval"><span id="v_score_threshold">{{ settings.score_threshold }}</span></span>
+    </div>
+    <div class="srow">
+      <label>TP target (ROE%)</label>
+      <input type="range" id="s_tp_roe_pct" min="10" max="100" step="5"
+             value="{{ settings.tp_roe_pct|int }}" oninput="syncVal(this,'v_tp_roe_pct');updatePreview()">
+      <span class="rval">+<span id="v_tp_roe_pct">{{ settings.tp_roe_pct|int }}</span>%</span>
+    </div>
+    <div class="srow">
+      <label>SL Hard (ROE%)</label>
+      <input type="range" id="s_sl_hard_roe_pct" min="5" max="50" step="5"
+             value="{{ settings.sl_hard_roe_pct|int }}" oninput="syncVal(this,'v_sl_hard_roe_pct');updatePreview()">
+      <span class="rval">-<span id="v_sl_hard_roe_pct">{{ settings.sl_hard_roe_pct|int }}</span>%</span>
+    </div>
+
+    <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+      <button class="save-btn" onclick="saveSettings()">Save to bot</button>
+      <span id="save_msg" style="font-size:12px"></span>
+    </div>
+  </div>
+
+  <!-- Trade Preview -->
+  <div class="card">
+    <h3>Trade Preview <span style="font-size:11px;color:#8b949e;font-weight:normal">(ประมาณการณ์)</span></h3>
+    <div class="balance-row">
+      <label>Balance (USDT)</label>
+      <input type="number" id="p_balance" value="100" step="10" min="1"
+             oninput="updatePreview()" placeholder="100">
+    </div>
+    <div class="preview-grid" id="preview_grid"></div>
+    <div class="cp-range" id="preview_copilot"></div>
+  </div>
+
 </div>
 <script>
-  // Auto-refresh every 30s
-  setTimeout(()=>location.reload(), 30000);
+function syncVal(el, targetId) {
+  document.getElementById(targetId).textContent = el.value;
+}
+function pCard(val, label, cls) {
+  return '<div class="preview-card"><div class="pv '+cls+'">'+val+'</div><div class="pl">'+label+'</div></div>';
+}
+function fmt(n) { return n >= 100 ? n.toFixed(1) : n.toFixed(2); }
+function updatePreview() {
+  var bal   = parseFloat(document.getElementById('p_balance').value) || 100;
+  var capPct= parseFloat(document.getElementById('s_capital_pct').value) / 100;
+  var lev   = parseInt(document.getElementById('s_leverage').value);
+  var tp    = parseFloat(document.getElementById('s_tp_roe_pct').value);
+  var sl    = parseFloat(document.getElementById('s_sl_hard_roe_pct').value);
+  var margin   = bal * capPct;
+  var notional = margin * lev;
+  var tpGain   = margin * tp / 100;
+  var slLoss   = margin * sl / 100;
+  var rr       = tp / sl;
+  var rrCls    = rr >= 2 ? 'green' : (rr >= 1 ? 'yellow' : 'red');
+  document.getElementById('preview_grid').innerHTML =
+    pCard('$'+fmt(margin), 'Margin (USDT)', 'blue') +
+    pCard('$'+fmt(notional), 'Notional ('+lev+'x)', 'blue') +
+    pCard('+$'+fmt(tpGain)+'<br><small>+'+tp+'% ROE</small>', 'TP Gain', 'green') +
+    pCard('-$'+fmt(slLoss)+'<br><small>-'+sl+'% ROE</small>', 'Max Loss (SL)', 'red') +
+    pCard(rr.toFixed(2)+':1', 'R:R Ratio', rrCls) +
+    pCard(tp+'% / '+sl+'% = '+fmt(notional*tp/100/100)+' USDT per 1%', 'Fee Impact', 'gray');
+  fetch('/api/copilot/state').then(r=>r.json()).then(function(d) {
+    var el = document.getElementById('preview_copilot');
+    if (d.enabled) {
+      var mn = margin*0.5, mx = margin*1.5;
+      el.innerHTML =
+        '<span class="badge b-blue">co-pilot ON</span>' +
+        ' &nbsp;Margin: <b>$'+fmt(mn)+'</b> – <b>$'+fmt(mx)+'</b>' +
+        ' &nbsp;|&nbsp; TP: <span class="green">+$'+fmt(mn*tp/100)+' – +$'+fmt(mx*tp/100)+'</span>' +
+        ' &nbsp;|&nbsp; SL: <span class="red">-$'+fmt(mn*sl/100)+' – -$'+fmt(mx*sl/100)+'</span>';
+    } else {
+      el.innerHTML = '<span class="badge b-gray">co-pilot OFF</span>' +
+        ' &nbsp;Fixed margin: <b>$'+fmt(margin)+'</b> &nbsp;Notional: <b>$'+fmt(notional)+'</b>';
+    }
+  });
+}
+function saveSettings() {
+  var data = {
+    capital_pct:     parseFloat(document.getElementById('s_capital_pct').value) / 100,
+    leverage:        parseInt(document.getElementById('s_leverage').value),
+    tp_roe_pct:      parseFloat(document.getElementById('s_tp_roe_pct').value),
+    sl_hard_roe_pct: parseFloat(document.getElementById('s_sl_hard_roe_pct').value),
+    score_threshold: parseFloat(document.getElementById('s_score_threshold').value)
+  };
+  fetch('/api/settings/save', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+  .then(r=>r.json()).then(function(d) {
+    var m = document.getElementById('save_msg');
+    m.textContent = d.ok ? 'Saved!' : 'Error: '+d.error;
+    m.style.color = d.ok ? '#3fb950' : '#f85149';
+    setTimeout(function(){m.textContent='';}, 2500);
+  });
+}
+updatePreview();
+setTimeout(()=>location.reload(), 30000);
 </script>
 </body></html>
 """
@@ -346,6 +483,27 @@ def _read_copilot_enabled() -> bool:
 
 def _write_copilot_enabled(state: bool) -> None:
     COPILOT_FILE.write_text(json.dumps({"enabled": state}), encoding="utf-8")
+
+
+_SETTINGS_DEFAULTS: dict = {
+    "capital_pct":     0.30,
+    "leverage":        8,
+    "tp_roe_pct":      30.0,
+    "sl_hard_roe_pct": 30.0,
+    "score_threshold": 3.5,
+}
+
+
+def _read_settings() -> dict:
+    data = _read_json(SETTINGS_FILE)
+    if data:
+        return {**_SETTINGS_DEFAULTS, **data}
+    return dict(_SETTINGS_DEFAULTS)
+
+
+def _write_settings(values: dict) -> None:
+    merged = {**_SETTINGS_DEFAULTS, **values}
+    SETTINGS_FILE.write_text(json.dumps(merged, indent=2), encoding="utf-8")
 
 
 def _read_json(path: Path) -> Optional[dict]:
@@ -454,7 +612,15 @@ def dashboard():
             setattr(c, k, v)
         live["copilot"] = c
 
-    return render_template_string(DASH_TMPL, live=live, pos=pos, summary=summary)
+    settings = _read_settings()
+
+    class _S:
+        pass
+    s = _S()
+    for k, v in settings.items():
+        setattr(s, k, v)
+
+    return render_template_string(DASH_TMPL, live=live, pos=pos, summary=summary, settings=s)
 
 
 @app.route("/log")
@@ -464,6 +630,21 @@ def log_page():
         all_lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
         lines = all_lines[-200:]
     return render_template_string(LOG_TMPL, content="\n".join(lines), count=len(lines))
+
+
+@app.route("/api/settings")
+def settings_get():
+    return jsonify(_read_settings())
+
+
+@app.route("/api/settings/save", methods=["POST"])
+def settings_save():
+    try:
+        data = request.get_json(force=True)
+        _write_settings(data)
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 @app.route("/api/copilot/state")

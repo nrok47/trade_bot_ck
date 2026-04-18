@@ -75,6 +75,26 @@ COOLDOWN_SECS    = 300       # 5 min between trades after any close
 STATE_FILE       = "gambler_state.json"
 LIVE_FILE        = "gambler_live.json"
 COPILOT_FILE     = "gambler_copilot.json"
+SETTINGS_FILE    = "gambler_settings.json"
+
+_SETTINGS_DEFAULTS = {
+    "capital_pct":     CAPITAL_PCT,
+    "leverage":        LEVERAGE,
+    "tp_roe_pct":      TP_ROE_PCT,
+    "sl_hard_roe_pct": SL_HARD_ROE_PCT,
+    "score_threshold": SCORE_THRESHOLD,
+}
+
+
+def _read_settings_bot() -> dict:
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE) as f:
+                data = json.load(f)
+            return {**_SETTINGS_DEFAULTS, **data}
+    except Exception:
+        pass
+    return dict(_SETTINGS_DEFAULTS)
 
 
 def _copilot_enabled() -> bool:
@@ -231,7 +251,7 @@ def _score_tf(candles: CandleData, weight: float) -> tuple[float, dict]:
     return score, info
 
 
-def compute_signal(symbol: str) -> tuple[str, float, dict, float]:
+def compute_signal(symbol: str, threshold: float = SCORE_THRESHOLD) -> tuple[str, float, dict, float]:
     """
     Fetch all TFs, aggregate scores, return:
       (direction, total_score, details_per_tf, atr_5m)
@@ -253,9 +273,9 @@ def compute_signal(symbol: str) -> tuple[str, float, dict, float]:
         if tf == "5m":
             atr_5m = info.get("atr", 0.0)
 
-    if total >= SCORE_THRESHOLD:
+    if total >= threshold:
         direction = "LONG"
-    elif total <= -SCORE_THRESHOLD:
+    elif total <= -threshold:
         direction = "SHORT"
     else:
         direction = "SKIP"
@@ -265,7 +285,9 @@ def compute_signal(symbol: str) -> tuple[str, float, dict, float]:
 
 # ── TP / SL levels ────────────────────────────────────────────────────────────
 
-def calc_levels(entry: float, side: str, atr_val: float = 0.0) -> tuple[float, float, float]:
+def calc_levels(entry: float, side: str, atr_val: float = 0.0,
+                tp_roe: float = TP_ROE_PCT, sl_hard_roe: float = SL_HARD_ROE_PCT,
+                leverage: int = LEVERAGE) -> tuple[float, float, float]:
     """
     Compute TP, SL_soft, SL_hard as absolute prices.
 
@@ -274,9 +296,9 @@ def calc_levels(entry: float, side: str, atr_val: float = 0.0) -> tuple[float, f
     ATR override: if 1.5×ATR > computed TP move, use ATR (avoid stop hunts).
     """
     fee_pct      = TAKER_FEE * 2          # two legs
-    tp_move      = TP_ROE_PCT      / 100 / LEVERAGE + fee_pct
-    sl_soft_move = SL_SOFT_ROE_PCT / 100 / LEVERAGE
-    sl_hard_move = SL_HARD_ROE_PCT / 100 / LEVERAGE
+    tp_move      = tp_roe      / 100 / leverage + fee_pct
+    sl_soft_move = SL_SOFT_ROE_PCT / 100 / leverage
+    sl_hard_move = sl_hard_roe / 100 / leverage
 
     if atr_val > 0:
         atr_move = atr_val / entry * 1.5
@@ -453,8 +475,9 @@ def run(symbol: str, dry_run: bool) -> None:
 
     while True:
         try:
+            s = _read_settings_bot()   # re-read each poll so dashboard changes apply immediately
             price   = binance.get_price()
-            direction, score, details, atr_5m = compute_signal(symbol)
+            direction, score, details, atr_5m = compute_signal(symbol, threshold=s["score_threshold"])
             cooldown_left = max(0.0, COOLDOWN_SECS - (time.time() - last_close_time))
 
             # ── Manage existing position ──────────────────────────────────
@@ -523,8 +546,13 @@ def run(symbol: str, dry_run: bool) -> None:
             # ── Enter new position ────────────────────────────────────────
             copilot_result: Optional[dict] = None
             if pos is None and direction != "SKIP" and cooldown_left == 0:
+                lev = int(s["leverage"])
                 balance = binance.get_balance("USDT")
-                margin  = balance * CAPITAL_PCT
+                margin  = balance * s["capital_pct"]
+
+                logger.info("Settings: cap=%.0f%% lev=%dx TP=%.0f%% SL=%.0f%% threshold=%.1f",
+                            s["capital_pct"]*100, lev,
+                            s["tp_roe_pct"], s["sl_hard_roe_pct"], s["score_threshold"])
 
                 # Co-pilot: scale margin by AI confidence (0.5× – 1.5×)
                 if _copilot_enabled():
@@ -542,14 +570,19 @@ def run(symbol: str, dry_run: bool) -> None:
                     except Exception as cp_exc:
                         logger.warning("CO-PILOT failed: %s — using base margin", cp_exc)
 
-                if margin * LEVERAGE < 5:
+                if margin * lev < 5:
                     logger.warning("Notional too small ($%.2f) — need balance > $%.2f",
-                                   margin * LEVERAGE, 5 / LEVERAGE / CAPITAL_PCT)
+                                   margin * lev, 5 / lev / s["capital_pct"])
                 else:
                     result = enter_market(direction, margin, price, dry_run)
                     if result:
                         fill_price, filled_qty = result
-                        tp, sl_soft, sl_hard = calc_levels(fill_price, direction, atr_5m)
+                        tp, sl_soft, sl_hard = calc_levels(
+                            fill_price, direction, atr_5m,
+                            tp_roe=s["tp_roe_pct"],
+                            sl_hard_roe=s["sl_hard_roe_pct"],
+                            leverage=lev,
+                        )
                         pos = Position(
                             side=direction,
                             entry_price=fill_price,
@@ -567,8 +600,8 @@ def run(symbol: str, dry_run: bool) -> None:
                             "ENTERED %s @ %.4f  TP=%.4f (+%.2f%% price / +%.0f%% ROE)"
                             "  SL_hard=%.4f (-%.2f%% price / -%.0f%% ROE)",
                             direction, fill_price,
-                            tp,  tp_pct,  tp_pct  * LEVERAGE,
-                            sl_hard, slh_pct, slh_pct * LEVERAGE,
+                            tp,  tp_pct,  tp_pct  * lev,
+                            sl_hard, slh_pct, slh_pct * lev,
                         )
                         skip_streak = 0
             elif direction == "SKIP" or cooldown_left > 0:
