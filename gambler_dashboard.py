@@ -120,6 +120,7 @@ _NAV = """
   <a href="/">Dashboard</a>
   <a href="/log">Log</a>
   <a href="/api/status">JSON</a>
+  <a href="/settings">Settings</a>
   <span style="flex:1"></span>
   <button id="cpBtn" class="btn-toggle" onclick="toggleCopilot()">...</button>
 </nav>
@@ -348,125 +349,9 @@ DASH_TMPL = """<!DOCTYPE html><html>
     {% endif %}
   </div>
 
-  <!-- Position Sizing Settings -->
-  <div class="card">
-    <h3>Position Sizing &amp; Targets
-      <span style="font-size:11px;color:#8b949e;font-weight:normal;margin-left:8px">
-        บันทึกแล้ว bot รับค่าทันที (ยกเว้น Leverage ต้องรีสตาร์ท)
-      </span>
-    </h3>
-
-    <div class="srow">
-      <label>Capital per trade (%)</label>
-      <input type="range" id="s_capital_pct" min="5" max="100" step="5"
-             value="{{ (settings.capital_pct*100)|int }}" oninput="syncVal(this,'v_capital_pct');updatePreview()">
-      <span class="rval"><span id="v_capital_pct">{{ (settings.capital_pct*100)|int }}</span>%</span>
-    </div>
-    <div class="srow">
-      <label>Leverage</label>
-      <input type="range" id="s_leverage" min="1" max="20" step="1"
-             value="{{ settings.leverage }}" oninput="syncVal(this,'v_leverage');updatePreview()">
-      <span class="rval"><span id="v_leverage">{{ settings.leverage }}</span>x</span>
-    </div>
-    <div class="srow">
-      <label>Score threshold (entry)</label>
-      <input type="range" id="s_score_threshold" min="1.0" max="8.0" step="0.5"
-             value="{{ settings.score_threshold }}" oninput="syncVal(this,'v_score_threshold')">
-      <span class="rval"><span id="v_score_threshold">{{ settings.score_threshold }}</span></span>
-    </div>
-    <div class="srow">
-      <label>TP target (ROE%)</label>
-      <input type="range" id="s_tp_roe_pct" min="10" max="100" step="5"
-             value="{{ settings.tp_roe_pct|int }}" oninput="syncVal(this,'v_tp_roe_pct');updatePreview()">
-      <span class="rval">+<span id="v_tp_roe_pct">{{ settings.tp_roe_pct|int }}</span>%</span>
-    </div>
-    <div class="srow">
-      <label>SL Hard (ROE%)</label>
-      <input type="range" id="s_sl_hard_roe_pct" min="5" max="50" step="5"
-             value="{{ settings.sl_hard_roe_pct|int }}" oninput="syncVal(this,'v_sl_hard_roe_pct');updatePreview()">
-      <span class="rval">-<span id="v_sl_hard_roe_pct">{{ settings.sl_hard_roe_pct|int }}</span>%</span>
-    </div>
-
-    <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
-      <button class="save-btn" onclick="saveSettings()">Save to bot</button>
-      <span id="save_msg" style="font-size:12px"></span>
-    </div>
-  </div>
-
-  <!-- Trade Preview -->
-  <div class="card">
-    <h3>Trade Preview <span style="font-size:11px;color:#8b949e;font-weight:normal">(ประมาณการณ์)</span></h3>
-    <div class="balance-row">
-      <label>Balance (USDT)</label>
-      <input type="number" id="p_balance" value="100" step="10" min="1"
-             oninput="updatePreview()" placeholder="100">
-    </div>
-    <div class="preview-grid" id="preview_grid"></div>
-    <div class="cp-range" id="preview_copilot"></div>
-  </div>
 
 </div>
 <script>
-function syncVal(el, targetId) {
-  document.getElementById(targetId).textContent = el.value;
-}
-function pCard(val, label, cls) {
-  return '<div class="preview-card"><div class="pv '+cls+'">'+val+'</div><div class="pl">'+label+'</div></div>';
-}
-function fmt(n) { return n >= 100 ? n.toFixed(1) : n.toFixed(2); }
-function updatePreview() {
-  var bal   = parseFloat(document.getElementById('p_balance').value) || 100;
-  var capPct= parseFloat(document.getElementById('s_capital_pct').value) / 100;
-  var lev   = parseInt(document.getElementById('s_leverage').value);
-  var tp    = parseFloat(document.getElementById('s_tp_roe_pct').value);
-  var sl    = parseFloat(document.getElementById('s_sl_hard_roe_pct').value);
-  var margin   = bal * capPct;
-  var notional = margin * lev;
-  var tpGain   = margin * tp / 100;
-  var slLoss   = margin * sl / 100;
-  var rr       = tp / sl;
-  var rrCls    = rr >= 2 ? 'green' : (rr >= 1 ? 'yellow' : 'red');
-  document.getElementById('preview_grid').innerHTML =
-    pCard('$'+fmt(margin), 'Margin (USDT)', 'blue') +
-    pCard('$'+fmt(notional), 'Notional ('+lev+'x)', 'blue') +
-    pCard('+$'+fmt(tpGain)+'<br><small>+'+tp+'% ROE</small>', 'TP Gain', 'green') +
-    pCard('-$'+fmt(slLoss)+'<br><small>-'+sl+'% ROE</small>', 'Max Loss (SL)', 'red') +
-    pCard(rr.toFixed(2)+':1', 'R:R Ratio', rrCls) +
-    pCard(tp+'% / '+sl+'% = '+fmt(notional*tp/100/100)+' USDT per 1%', 'Fee Impact', 'gray');
-  fetch('/api/copilot/state').then(r=>r.json()).then(function(d) {
-    var el = document.getElementById('preview_copilot');
-    if (d.enabled) {
-      var mn = margin*0.5, mx = margin*1.5;
-      el.innerHTML =
-        '<span class="badge b-blue">co-pilot ON</span>' +
-        ' &nbsp;Margin: <b>$'+fmt(mn)+'</b> – <b>$'+fmt(mx)+'</b>' +
-        ' &nbsp;|&nbsp; TP: <span class="green">+$'+fmt(mn*tp/100)+' – +$'+fmt(mx*tp/100)+'</span>' +
-        ' &nbsp;|&nbsp; SL: <span class="red">-$'+fmt(mn*sl/100)+' – -$'+fmt(mx*sl/100)+'</span>';
-    } else {
-      el.innerHTML = '<span class="badge b-gray">co-pilot OFF</span>' +
-        ' &nbsp;Fixed margin: <b>$'+fmt(margin)+'</b> &nbsp;Notional: <b>$'+fmt(notional)+'</b>';
-    }
-  });
-}
-function saveSettings() {
-  var data = {
-    capital_pct:     parseFloat(document.getElementById('s_capital_pct').value) / 100,
-    leverage:        parseInt(document.getElementById('s_leverage').value),
-    tp_roe_pct:      parseFloat(document.getElementById('s_tp_roe_pct').value),
-    sl_hard_roe_pct: parseFloat(document.getElementById('s_sl_hard_roe_pct').value),
-    score_threshold: parseFloat(document.getElementById('s_score_threshold').value)
-  };
-  fetch('/api/settings/save', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-  .then(r=>r.json()).then(function(d) {
-    var m = document.getElementById('save_msg');
-    m.textContent = d.ok ? 'Saved!' : 'Error: '+d.error;
-    m.style.color = d.ok ? '#3fb950' : '#f85149';
-    setTimeout(function(){m.textContent='';}, 2500);
-  });
-}
-updatePreview();
-
 // ── TF Score Chart ──
 async function loadChart() {
   var res = await fetch('/api/history');
@@ -517,6 +402,126 @@ LOG_TMPL = """<!DOCTYPE html><html>
   var el = document.getElementById('logbox');
   el.scrollTop = el.scrollHeight;
   setTimeout(()=>location.reload(), 30000);
+</script>
+</body></html>
+"""
+
+SETTINGS_TMPL = """<!DOCTYPE html><html>
+<head>""" + _STYLE + """</head>
+<body>""" + _NAV + """
+<div class="container">
+
+  <div class="card">
+    <h3>Position Sizing &amp; Targets
+      <span style="font-size:11px;color:#8b949e;font-weight:normal;margin-left:8px">
+        บันทึกแล้ว bot รับค่าทันที (ยกเว้น Leverage ต้องรีสตาร์ท)
+      </span>
+    </h3>
+    <div class="srow">
+      <label>Capital per trade (%)</label>
+      <input type="range" id="s_capital_pct" min="5" max="100" step="5"
+             value="{{ (settings.capital_pct*100)|int }}" oninput="syncVal(this,'v_capital_pct');updatePreview()">
+      <span class="rval"><span id="v_capital_pct">{{ (settings.capital_pct*100)|int }}</span>%</span>
+    </div>
+    <div class="srow">
+      <label>Leverage</label>
+      <input type="range" id="s_leverage" min="1" max="20" step="1"
+             value="{{ settings.leverage }}" oninput="syncVal(this,'v_leverage');updatePreview()">
+      <span class="rval"><span id="v_leverage">{{ settings.leverage }}</span>x</span>
+    </div>
+    <div class="srow">
+      <label>Score threshold (entry)</label>
+      <input type="range" id="s_score_threshold" min="1.0" max="8.0" step="0.5"
+             value="{{ settings.score_threshold }}" oninput="syncVal(this,'v_score_threshold')">
+      <span class="rval"><span id="v_score_threshold">{{ settings.score_threshold }}</span></span>
+    </div>
+    <div class="srow">
+      <label>TP target (ROE%)</label>
+      <input type="range" id="s_tp_roe_pct" min="10" max="100" step="5"
+             value="{{ settings.tp_roe_pct|int }}" oninput="syncVal(this,'v_tp_roe_pct');updatePreview()">
+      <span class="rval">+<span id="v_tp_roe_pct">{{ settings.tp_roe_pct|int }}</span>%</span>
+    </div>
+    <div class="srow">
+      <label>SL Hard (ROE%)</label>
+      <input type="range" id="s_sl_hard_roe_pct" min="5" max="50" step="5"
+             value="{{ settings.sl_hard_roe_pct|int }}" oninput="syncVal(this,'v_sl_hard_roe_pct');updatePreview()">
+      <span class="rval">-<span id="v_sl_hard_roe_pct">{{ settings.sl_hard_roe_pct|int }}</span>%</span>
+    </div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+      <button class="save-btn" onclick="saveSettings()">Save to bot</button>
+      <span id="save_msg" style="font-size:12px"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Trade Preview <span style="font-size:11px;color:#8b949e;font-weight:normal">(ประมาณการณ์)</span></h3>
+    <div class="balance-row">
+      <label>Balance (USDT)</label>
+      <input type="number" id="p_balance" value="100" step="10" min="1"
+             oninput="updatePreview()" placeholder="100">
+    </div>
+    <div class="preview-grid" id="preview_grid"></div>
+    <div class="cp-range" id="preview_copilot"></div>
+  </div>
+
+</div>
+<script>
+function syncVal(el, id) { document.getElementById(id).textContent = el.value; }
+function pCard(val, label, cls) {
+  return '<div class="preview-card"><div class="pv '+cls+'">'+val+'</div><div class="pl">'+label+'</div></div>';
+}
+function fmt(n) { return n >= 100 ? n.toFixed(1) : n.toFixed(2); }
+function updatePreview() {
+  var bal   = parseFloat(document.getElementById('p_balance').value) || 100;
+  var capPct= parseFloat(document.getElementById('s_capital_pct').value) / 100;
+  var lev   = parseInt(document.getElementById('s_leverage').value);
+  var tp    = parseFloat(document.getElementById('s_tp_roe_pct').value);
+  var sl    = parseFloat(document.getElementById('s_sl_hard_roe_pct').value);
+  var margin   = bal * capPct;
+  var notional = margin * lev;
+  var tpGain   = margin * tp / 100;
+  var slLoss   = margin * sl / 100;
+  var rr       = tp / sl;
+  var rrCls    = rr >= 2 ? 'green' : (rr >= 1 ? 'yellow' : 'red');
+  document.getElementById('preview_grid').innerHTML =
+    pCard('$'+fmt(margin), 'Margin (USDT)', 'blue') +
+    pCard('$'+fmt(notional), 'Notional ('+lev+'x)', 'blue') +
+    pCard('+$'+fmt(tpGain)+'<br><small>+'+tp+'% ROE</small>', 'TP Gain', 'green') +
+    pCard('-$'+fmt(slLoss)+'<br><small>-'+sl+'% ROE</small>', 'Max Loss (SL)', 'red') +
+    pCard(rr.toFixed(2)+':1', 'R:R Ratio', rrCls) +
+    pCard(tp+'% / '+sl+'% = '+fmt(notional*tp/100/100)+' USDT per 1%', 'Fee Impact', 'gray');
+  fetch('/api/copilot/state').then(r=>r.json()).then(function(d) {
+    var el = document.getElementById('preview_copilot');
+    if (d.enabled) {
+      var mn = margin*0.5, mx = margin*1.5;
+      el.innerHTML = '<span class="badge b-blue">co-pilot ON</span>' +
+        ' &nbsp;Margin: <b>$'+fmt(mn)+'</b> – <b>$'+fmt(mx)+'</b>' +
+        ' &nbsp;|&nbsp; TP: <span class="green">+$'+fmt(mn*tp/100)+' – +$'+fmt(mx*tp/100)+'</span>' +
+        ' &nbsp;|&nbsp; SL: <span class="red">-$'+fmt(mn*sl/100)+' – -$'+fmt(mx*sl/100)+'</span>';
+    } else {
+      el.innerHTML = '<span class="badge b-gray">co-pilot OFF</span>' +
+        ' &nbsp;Fixed margin: <b>$'+fmt(margin)+'</b> &nbsp;Notional: <b>$'+fmt(notional)+'</b>';
+    }
+  });
+}
+function saveSettings() {
+  var data = {
+    capital_pct:     parseFloat(document.getElementById('s_capital_pct').value) / 100,
+    leverage:        parseInt(document.getElementById('s_leverage').value),
+    tp_roe_pct:      parseFloat(document.getElementById('s_tp_roe_pct').value),
+    sl_hard_roe_pct: parseFloat(document.getElementById('s_sl_hard_roe_pct').value),
+    score_threshold: parseFloat(document.getElementById('s_score_threshold').value)
+  };
+  fetch('/api/settings/save', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+  .then(r=>r.json()).then(function(d) {
+    var m = document.getElementById('save_msg');
+    m.textContent = d.ok ? 'Saved!' : 'Error: '+d.error;
+    m.style.color = d.ok ? '#3fb950' : '#f85149';
+    setTimeout(function(){m.textContent='';}, 2500);
+  });
+}
+updatePreview();
 </script>
 </body></html>
 """
@@ -661,15 +666,7 @@ def dashboard():
             setattr(c, k, v)
         live["copilot"] = c
 
-    settings = _read_settings()
-
-    class _S:
-        pass
-    s = _S()
-    for k, v in settings.items():
-        setattr(s, k, v)
-
-    return render_template_string(DASH_TMPL, live=live, pos=pos, summary=summary, settings=s)
+    return render_template_string(DASH_TMPL, live=live, pos=pos, summary=summary)
 
 
 @app.route("/log")
@@ -679,6 +676,17 @@ def log_page():
         all_lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
         lines = all_lines[-200:]
     return render_template_string(LOG_TMPL, content="\n".join(lines), count=len(lines))
+
+
+@app.route("/settings")
+def settings_page():
+    settings = _read_settings()
+    class _S:
+        pass
+    s = _S()
+    for k, v in settings.items():
+        setattr(s, k, v)
+    return render_template_string(SETTINGS_TMPL, settings=s)
 
 
 @app.route("/api/settings")
