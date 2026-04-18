@@ -62,21 +62,49 @@ logging.basicConfig(
 )
 logger = logging.getLogger("gambler")
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-LEVERAGE         = 8
-CAPITAL_PCT      = 0.30      # 30% of free balance
-TAKER_FEE        = 0.0004    # 0.04% per leg (USDT-M futures taker)
-TP_ROE_PCT       = 30.0      # target ROE%
-SL_SOFT_ROE_PCT  = 10.0      # soft stop ROE% → trend re-check
-SL_HARD_ROE_PCT  = 30.0      # hard stop ROE% → force close
-POLL_INTERVAL    = 30        # seconds
-SCORE_THRESHOLD  = 3.5       # minimum |score| to enter (out of ~11 max)
-COOLDOWN_SECS    = 300       # 5 min between trades after any close
-STATE_FILE       = "gambler_state.json"
-LIVE_FILE        = "gambler_live.json"
-COPILOT_FILE     = "gambler_copilot.json"
-SETTINGS_FILE    = "gambler_settings.json"
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  CONFIGURATION — แก้ตรงนี้เพื่อปรับค่าเริ่มต้นของบอท               ║
+# ║  (ปรับขณะรันได้ผ่าน Dashboard → บันทึกลง gambler_settings.json)    ║
+# ╚══════════════════════════════════════════════════════════════════════╝
 
+# ── Money Management ──────────────────────────────────────────────────────────
+LEVERAGE         = 8       # leverage (1–20); เปลี่ยนต้องรีสตาร์ทบอท
+CAPITAL_PCT      = 0.30    # สัดส่วน balance ต่อไม้  0.30 = 30%
+TAKER_FEE        = 0.0004  # futures taker fee ต่อขา (0.04%)
+TP_ROE_PCT       = 30.0    # เป้ากำไร ROE% ต่อไม้
+SL_SOFT_ROE_PCT  = 10.0    # Soft SL: re-check trend แล้วค่อยตัดสิน
+SL_HARD_ROE_PCT  = 30.0    # Hard SL: ปิดทันทีไม่มีข้อแม้
+
+# ── Strategy Tuning ───────────────────────────────────────────────────────────
+SCORE_THRESHOLD  = 3.5     # คะแนนขั้นต่ำก่อนเปิดไม้ (max ~11)
+EMA_GAP_PCT      = 0.03    # % ช่องว่าง EMA9/21 ถึงนับเป็น trend
+RSI_OVERSOLD     = 40      # RSI ต่ำกว่านี้ → bullish signal
+RSI_OVERBOUGHT   = 60      # RSI สูงกว่านี้ → bearish signal
+VOL_SURGE_MULT   = 2.0     # volume ต้องสูงกว่า avg × ค่านี้ ถึงนับ surge
+
+# ── Timing ────────────────────────────────────────────────────────────────────
+POLL_INTERVAL    = 30      # วินาที ระหว่างแต่ละรอบ
+COOLDOWN_SECS    = 300     # วินาที รอหลังปิดไม้ก่อนจะเปิดใหม่
+
+# ── Dynamic Exit Rules ────────────────────────────────────────────────────────
+TRAIL_ACTIVATE_ROE    = 10.0  # เปิด trailing หลัง ROE peak ≥ ค่านี้
+TRAIL_GIVEBACK_PCT    = 0.40  # ปิดเมื่อ ROE ถอยลง 40% จาก peak
+MIN_ROE_FOR_FLIP_EXIT = 5.0   # ต้องมีกำไร ≥ ค่านี้ ถึง early-exit เมื่อ trend กลับ
+
+# ── Timeframe Weights (12h lookback) ─────────────────────────────────────────
+TF_CONFIG: dict[str, dict] = {
+    "3m":  {"limit": 240, "weight": 1.0},
+    "5m":  {"limit": 144, "weight": 1.5},
+    "15m": {"limit":  48, "weight": 2.0},  # 15m นับหนักที่สุด
+}
+
+# ── Internal files (ไม่ต้องแตะ) ──────────────────────────────────────────────
+STATE_FILE    = "gambler_state.json"
+LIVE_FILE     = "gambler_live.json"
+COPILOT_FILE  = "gambler_copilot.json"
+SETTINGS_FILE = "gambler_settings.json"
+
+# defaults ที่ dashboard ใช้แสดงเมื่อยังไม่เคย save settings
 _SETTINGS_DEFAULTS = {
     "capital_pct":     CAPITAL_PCT,
     "leverage":        LEVERAGE,
@@ -98,38 +126,13 @@ def _read_settings_bot() -> dict:
 
 
 def _copilot_enabled() -> bool:
-    """Read co-pilot toggle from file (set by dashboard). Falls back to env var."""
     try:
         if os.path.exists(COPILOT_FILE):
             with open(COPILOT_FILE) as f:
                 return bool(json.load(f).get("enabled", True))
     except Exception:
         pass
-    return os.getenv("COPILOT_ENABLED", "true").lower() != "false"
-
-# ── Dynamic profit-taking (when trend changes, don't wait for full TP) ───────
-# Trailing stop: once ROE peaked at >= TRAIL_ACTIVATE, exit when we give back
-# TRAIL_GIVEBACK_PCT of the peak. Locks in gains without closing too early.
-TRAIL_ACTIVATE_ROE   = 10.0   # activate trailing after peak hits +10% ROE
-TRAIL_GIVEBACK_PCT   = 0.40   # close when current drops 40% below peak
-# Early TP on trend flip: if in profit and signal flips to opposite side,
-# take the money — don't sit through the reversal waiting for full 30% TP.
-MIN_ROE_FOR_FLIP_EXIT = 5.0   # require at least +5% ROE before honouring flip
-
-# ── Signal thresholds (independent from grid bot config) ──────────────────────
-# EMA gap: lower than grid bot (0.1%) — grid needs stricter filter to avoid resets;
-# gambler only needs to detect trend, 0.03% is enough to avoid flat-line noise.
-EMA_GAP_PCT      = 0.03   # % gap EMA_SHORT vs EMA_LONG to count as trend signal
-RSI_OVERSOLD     = 40     # RSI below this → bullish pressure   (grid uses 35, too strict)
-RSI_OVERBOUGHT   = 60     # RSI above this → bearish pressure   (grid uses 65, too strict)
-VOL_SURGE_MULT   = 2.0    # volume must be N× 20-bar avg to count as surge
-
-# TF config: limit = 12h of candles  |  weight: 15m counts most
-TF_CONFIG: dict[str, dict] = {
-    "3m":  {"limit": 240, "weight": 1.0},
-    "5m":  {"limit": 144, "weight": 1.5},
-    "15m": {"limit":  48, "weight": 2.0},
-}
+    return True  # default ON; ปิดได้จาก Dashboard
 
 
 # ── Position dataclass ────────────────────────────────────────────────────────
