@@ -21,15 +21,16 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from flask import Flask, render_template_string, jsonify
+    from flask import Flask, render_template_string, jsonify, request
 except ImportError:
     print("ติดตั้ง Flask ก่อน:  pip install flask")
     raise
 
-BASE_DIR    = Path(__file__).parent
-STATE_FILE  = BASE_DIR / "gambler_state.json"
-LIVE_FILE   = BASE_DIR / "gambler_live.json"
-LOG_FILE    = BASE_DIR / "gambler_bot.log"
+BASE_DIR      = Path(__file__).parent
+STATE_FILE    = BASE_DIR / "gambler_state.json"
+LIVE_FILE     = BASE_DIR / "gambler_live.json"
+LOG_FILE      = BASE_DIR / "gambler_bot.log"
+COPILOT_FILE  = BASE_DIR / "gambler_copilot.json"
 
 app = Flask(__name__)
 
@@ -80,6 +81,11 @@ _STYLE = """
   .stale{opacity:.45}
   .refresh-info{color:#8b949e;font-size:11px;margin-top:4px}
   .no-pos{color:#8b949e;font-style:italic}
+  .btn-toggle{padding:3px 12px;border-radius:12px;font-size:12px;cursor:pointer;
+    font-family:monospace;transition:opacity .15s}
+  .btn-toggle:hover{opacity:.8}
+  .btn-on{background:#0f3d20;color:#3fb950;border:1px solid #3fb950}
+  .btn-off{background:#3d0f0f;color:#f85149;border:1px solid #f85149}
 </style>
 """
 
@@ -89,7 +95,28 @@ _NAV = """
   <a href="/">Dashboard</a>
   <a href="/log">Log</a>
   <a href="/api/status">JSON</a>
+  <span style="flex:1"></span>
+  <button id="cpBtn" class="btn-toggle" onclick="toggleCopilot()">...</button>
 </nav>
+<script>
+function _setCopilotBtn(enabled) {
+  var btn = document.getElementById('cpBtn');
+  if (!btn) return;
+  if (enabled) {
+    btn.textContent = 'AI co-pilot: ON';
+    btn.className = 'btn-toggle btn-on';
+  } else {
+    btn.textContent = 'AI co-pilot: OFF';
+    btn.className = 'btn-toggle btn-off';
+  }
+}
+function toggleCopilot() {
+  fetch('/api/copilot/toggle', {method:'POST'})
+    .then(r => r.json())
+    .then(d => _setCopilotBtn(d.enabled));
+}
+fetch('/api/copilot/state').then(r=>r.json()).then(d=>_setCopilotBtn(d.enabled));
+</script>
 """
 
 # ── Main dashboard template ────────────────────────────────────────────────────
@@ -310,6 +337,17 @@ LOG_TMPL = """<!DOCTYPE html><html>
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
 
+def _read_copilot_enabled() -> bool:
+    data = _read_json(COPILOT_FILE)
+    if data is not None:
+        return bool(data.get("enabled", True))
+    return os.getenv("COPILOT_ENABLED", "true").lower() != "false"
+
+
+def _write_copilot_enabled(state: bool) -> None:
+    COPILOT_FILE.write_text(json.dumps({"enabled": state}), encoding="utf-8")
+
+
 def _read_json(path: Path) -> Optional[dict]:
     if not path.exists():
         return None
@@ -426,6 +464,18 @@ def log_page():
         all_lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
         lines = all_lines[-200:]
     return render_template_string(LOG_TMPL, content="\n".join(lines), count=len(lines))
+
+
+@app.route("/api/copilot/state")
+def copilot_state():
+    return jsonify({"enabled": _read_copilot_enabled()})
+
+
+@app.route("/api/copilot/toggle", methods=["POST"])
+def copilot_toggle():
+    new_state = not _read_copilot_enabled()
+    _write_copilot_enabled(new_state)
+    return jsonify({"enabled": new_state})
 
 
 @app.route("/api/status")

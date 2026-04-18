@@ -74,7 +74,18 @@ SCORE_THRESHOLD  = 3.5       # minimum |score| to enter (out of ~11 max)
 COOLDOWN_SECS    = 300       # 5 min between trades after any close
 STATE_FILE       = "gambler_state.json"
 LIVE_FILE        = "gambler_live.json"
-COPILOT_ENABLED  = os.getenv("COPILOT_ENABLED", "true").lower() != "false"
+COPILOT_FILE     = "gambler_copilot.json"
+
+
+def _copilot_enabled() -> bool:
+    """Read co-pilot toggle from file (set by dashboard). Falls back to env var."""
+    try:
+        if os.path.exists(COPILOT_FILE):
+            with open(COPILOT_FILE) as f:
+                return bool(json.load(f).get("enabled", True))
+    except Exception:
+        pass
+    return os.getenv("COPILOT_ENABLED", "true").lower() != "false"
 
 # ── Dynamic profit-taking (when trend changes, don't wait for full TP) ───────
 # Trailing stop: once ROE peaked at >= TRAIL_ACTIVATE, exit when we give back
@@ -516,7 +527,7 @@ def run(symbol: str, dry_run: bool) -> None:
                 margin  = balance * CAPITAL_PCT
 
                 # Co-pilot: scale margin by AI confidence (0.5× – 1.5×)
-                if COPILOT_ENABLED:
+                if _copilot_enabled():
                     try:
                         from ai_copilot import evaluate_trade as _cp_eval
                         copilot_result = _cp_eval(direction, score, details, price, atr_5m)
