@@ -268,12 +268,17 @@ class GridEngine:
         """ตรวจ order fills แล้ว react ทันที. คืน list ของ order ที่เพิ่ง fill."""
         newly_filled: list[GridOrder] = []
 
+        # เรียก get_price() ครั้งเดียวต่อ poll cycle (ลด API calls จาก N→1)
+        dry_price: Optional[float] = None
+
         for go in list(self.orders.values()):
             if go.status != "NEW":
                 continue
 
             if go.order_id.startswith("DRY_"):
-                current_price = binance.get_price()
+                if dry_price is None:
+                    dry_price = binance.get_price()
+                current_price = dry_price
 
                 # ── Stop Loss check (BUY ที่ fill แล้วรอ SELL) ──────────────
                 if (go.side == OrderSide.SELL and go.stop_loss_price

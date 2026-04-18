@@ -542,7 +542,7 @@ def run() -> None:
     _last_alert_upper = False
     _last_alert_lower = False
     _last_heartbeat_cycle = 0
-    _heartbeat_interval = max(1, int(180 / config.POLL_INTERVAL_SECONDS))  # ทุก 3 นาที
+    _heartbeat_interval = max(1, int(60 / config.POLL_INTERVAL_SECONDS))  # ทุก ~60 วินาที
     _last_cooldown_direction: str = ""
 
     with Live(console=console, refresh_per_second=0.5, screen=True) as live:
