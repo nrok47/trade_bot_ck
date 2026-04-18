@@ -491,7 +491,7 @@ async function loadChart() {
         }}
       },
       scales: {
-        x: {ticks:{color:'#8b949e',font:{family:'monospace',size:10},maxTicksLimit:10},grid:{color:'#21262d'}},
+        x: {ticks:{color:'#8b949e',font:{family:'monospace',size:10},maxTicksLimit:20},grid:{color:'#21262d'}},
         y: {min:-8,max:8,ticks:{color:'#8b949e',font:{family:'monospace',size:10}},grid:{color:'#21262d'}}
       }
     }
