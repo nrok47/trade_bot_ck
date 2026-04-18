@@ -32,6 +32,7 @@ LIVE_FILE     = BASE_DIR / "gambler_live.json"
 LOG_FILE      = BASE_DIR / "gambler_bot.log"
 COPILOT_FILE   = BASE_DIR / "gambler_copilot.json"
 SETTINGS_FILE  = BASE_DIR / "gambler_settings.json"
+HISTORY_FILE   = BASE_DIR / "gambler_history.json"
 
 app = Flask(__name__)
 
@@ -109,6 +110,8 @@ _STYLE = """
     cursor:pointer;font-size:13px;font-family:monospace}
   .save-btn:hover{background:#2ea043}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 """
 
 _NAV = """
@@ -274,6 +277,19 @@ DASH_TMPL = """<!DOCTYPE html><html>
     {% else %}
     <p class="no-pos">No open position</p>
     {% endif %}
+  </div>
+
+  <!-- TF Score History Chart -->
+  <div class="card">
+    <h3>TF Score History
+      <span style="font-size:11px;color:#8b949e">
+        &nbsp;<span style="color:#79c0ff">&#9632;</span> 3m (w&times;1.0)
+        &nbsp;<span style="color:#3fb950">&#9632;</span> 5m (w&times;1.5)
+        &nbsp;<span style="color:#e3b341">&#9632;</span> 15m (w&times;2.0)
+        &nbsp;<span style="color:#555">&#8212; &plusmn;3.5 threshold</span>
+      </span>
+    </h3>
+    <canvas id="histChart" height="90"></canvas>
   </div>
 
   <!-- Trade Summary -->
@@ -450,6 +466,39 @@ function saveSettings() {
   });
 }
 updatePreview();
+
+// ── TF Score Chart ──
+async function loadChart() {
+  var res = await fetch('/api/history');
+  var h = await res.json();
+  if (!h.length) return;
+  var labels = h.map(function(d){return d.ts;});
+  function mk(key, color) {
+    return {label:key, data:h.map(function(d){return d[key];}),
+      borderColor:color, borderWidth:1.5, pointRadius:0, tension:0.3, fill:false};
+  }
+  new Chart(document.getElementById('histChart').getContext('2d'), {
+    type: 'line',
+    data: {labels: labels, datasets: [mk('3m','#79c0ff'), mk('5m','#3fb950'), mk('15m','#e3b341')]},
+    options: {
+      animation: false,
+      plugins: {
+        legend: {labels:{color:'#8b949e',font:{family:'monospace',size:11},boxWidth:12}},
+        annotation: {annotations: {
+          hi:   {type:'line',yMin: 3.5,yMax: 3.5,borderColor:'#ffffff33',borderWidth:1,borderDash:[4,3]},
+          lo:   {type:'line',yMin:-3.5,yMax:-3.5,borderColor:'#ffffff33',borderWidth:1,borderDash:[4,3]},
+          zero: {type:'line',yMin:0,   yMax:0,   borderColor:'#ffffff18',borderWidth:1},
+        }}
+      },
+      scales: {
+        x: {ticks:{color:'#8b949e',font:{family:'monospace',size:10},maxTicksLimit:10},grid:{color:'#21262d'}},
+        y: {min:-8,max:8,ticks:{color:'#8b949e',font:{family:'monospace',size:10}},grid:{color:'#21262d'}}
+      }
+    }
+  });
+}
+loadChart();
+
 setTimeout(()=>location.reload(), 30000);
 </script>
 </body></html>
@@ -657,6 +706,11 @@ def copilot_toggle():
     new_state = not _read_copilot_enabled()
     _write_copilot_enabled(new_state)
     return jsonify({"enabled": new_state})
+
+
+@app.route("/api/history")
+def api_history():
+    return jsonify(_read_json(HISTORY_FILE) or [])
 
 
 @app.route("/api/status")

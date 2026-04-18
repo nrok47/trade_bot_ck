@@ -103,6 +103,8 @@ STATE_FILE    = "gambler_state.json"
 LIVE_FILE     = "gambler_live.json"
 COPILOT_FILE  = "gambler_copilot.json"
 SETTINGS_FILE = "gambler_settings.json"
+HISTORY_FILE  = "gambler_history.json"
+HISTORY_MAX   = 200   # 200 × 30s ≈ 100 นาที
 
 # defaults ที่ dashboard ใช้แสดงเมื่อยังไม่เคย save settings
 _SETTINGS_DEFAULTS = {
@@ -425,6 +427,28 @@ def _save_live(price: float, direction: str, score: float, details: dict,
             data["copilot"] = copilot
         with open(LIVE_FILE, "w") as f:
             json.dump(data, f)
+
+        # append per-TF scores to rolling history for chart
+        entry = {
+            "ts":    time.strftime("%H:%M:%S"),
+            "3m":    round(details.get("3m",  {}).get("score", 0), 3),
+            "5m":    round(details.get("5m",  {}).get("score", 0), 3),
+            "15m":   round(details.get("15m", {}).get("score", 0), 3),
+            "total": round(score, 3),
+        }
+        try:
+            history: list = []
+            if os.path.exists(HISTORY_FILE):
+                with open(HISTORY_FILE) as fh:
+                    history = json.load(fh)
+            history.append(entry)
+            if len(history) > HISTORY_MAX:
+                history = history[-HISTORY_MAX:]
+            with open(HISTORY_FILE, "w") as fh:
+                json.dump(history, fh)
+        except Exception:
+            pass
+
     except Exception as exc:
         logger.debug("_save_live error: %s", exc)
 
