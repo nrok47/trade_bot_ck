@@ -74,6 +74,15 @@ SCORE_THRESHOLD  = 3.5       # minimum |score| to enter (out of ~11 max)
 COOLDOWN_SECS    = 300       # 5 min between trades after any close
 STATE_FILE       = "gambler_state.json"
 
+# ── Dynamic profit-taking (when trend changes, don't wait for full TP) ───────
+# Trailing stop: once ROE peaked at >= TRAIL_ACTIVATE, exit when we give back
+# TRAIL_GIVEBACK_PCT of the peak. Locks in gains without closing too early.
+TRAIL_ACTIVATE_ROE   = 10.0   # activate trailing after peak hits +10% ROE
+TRAIL_GIVEBACK_PCT   = 0.40   # close when current drops 40% below peak
+# Early TP on trend flip: if in profit and signal flips to opposite side,
+# take the money — don't sit through the reversal waiting for full 30% TP.
+MIN_ROE_FOR_FLIP_EXIT = 5.0   # require at least +5% ROE before honouring flip
+
 # ── Signal thresholds (independent from grid bot config) ──────────────────────
 # EMA gap: lower than grid bot (0.1%) — grid needs stricter filter to avoid resets;
 # gambler only needs to detect trend, 0.03% is enough to avoid flat-line noise.
@@ -102,6 +111,7 @@ class Position:
     sl_soft_price: float
     sl_hard_price: float
     entry_time: float    # unix timestamp
+    peak_roe: float = 0.0   # highest ROE reached during this position's lifetime
 
     def roe(self, price: float) -> float:
         """Unrealised ROE % (excludes fees)."""
@@ -119,8 +129,11 @@ class Position:
         try:
             with open(STATE_FILE) as f:
                 d = json.load(f)
+            # tolerate older state files missing newer fields
+            d.setdefault("peak_roe", 0.0)
             p = cls(**d)
-            logger.info("Restored position: %s @ %.4f  qty=%.4f", p.side, p.entry_price, p.qty)
+            logger.info("Restored position: %s @ %.4f  qty=%.4f  peak_roe=%.2f%%",
+                        p.side, p.entry_price, p.qty, p.peak_roe)
             return p
         except Exception as exc:
             logger.warning("Cannot restore state: %s", exc)
@@ -373,8 +386,12 @@ def print_dashboard(pos: Optional[Position], price: float, score: float,
         roe = pos.roe(price)
         roe_bar = "+" * max(0, int(roe / 5)) if roe >= 0 else "-" * max(0, int(-roe / 5))
         print(f"  OPEN {pos.side} @ {pos.entry_price:.4f}  qty={pos.qty:.4f}"
-              f"  ROE={roe:+.2f}% [{roe_bar}]")
+              f"  ROE={roe:+.2f}% [{roe_bar}]  peak={pos.peak_roe:+.2f}%")
         print(f"  TP={pos.tp_price:.4f}  SL_soft={pos.sl_soft_price:.4f}  SL_hard={pos.sl_hard_price:.4f}")
+        # show trailing stop trigger level once armed
+        if pos.peak_roe >= TRAIL_ACTIVATE_ROE:
+            trail_roe = pos.peak_roe * (1 - TRAIL_GIVEBACK_PCT)
+            print(f"  Trailing armed: exit if ROE drops below {trail_roe:+.2f}%")
     else:
         print(f"  No open position")
 
@@ -409,6 +426,10 @@ def run(symbol: str, dry_run: bool) -> None:
             # ── Manage existing position ──────────────────────────────────
             if pos is not None:
                 roe = pos.roe(price)
+                # track running peak so trailing / flip rules have reference
+                if roe > pos.peak_roe:
+                    pos.peak_roe = roe
+                    pos.save()
 
                 # Hard SL — always close
                 hard_hit = (pos.side == "LONG"  and price <= pos.sl_hard_price) or \
@@ -425,6 +446,27 @@ def run(symbol: str, dry_run: bool) -> None:
                     close_market(pos, f"TP({roe:.1f}%)", dry_run)
                     pos = None; Position.clear(); last_close_time = time.time()
 
+                # Trailing stop — once peak hit activation, lock-in gains on pullback
+                elif pos.peak_roe >= TRAIL_ACTIVATE_ROE and \
+                     roe <= pos.peak_roe * (1 - TRAIL_GIVEBACK_PCT):
+                    giveback = pos.peak_roe - roe
+                    logger.info(
+                        "TRAIL_STOP  peak=%.2f%%  roe=%.2f%%  giveback=%.2f%%",
+                        pos.peak_roe, roe, giveback,
+                    )
+                    close_market(pos, f"TRAIL(peak={pos.peak_roe:.1f}%→{roe:.1f}%)", dry_run)
+                    pos = None; Position.clear(); last_close_time = time.time()
+
+                # Early TP — trend flipped while in profit, take the money
+                elif roe >= MIN_ROE_FOR_FLIP_EXIT and \
+                     direction not in ("SKIP", pos.side):
+                    logger.info(
+                        "TREND_FLIP_TP  dir=%s vs pos=%s  score=%+.2f  ROE=%.2f%%",
+                        direction, pos.side, score, roe,
+                    )
+                    close_market(pos, f"FLIP_TP({roe:.1f}%)", dry_run)
+                    pos = None; Position.clear(); last_close_time = time.time()
+
                 # Soft SL — re-check trend
                 elif (pos.side == "LONG"  and price <= pos.sl_soft_price) or \
                      (pos.side == "SHORT" and price >= pos.sl_soft_price):
@@ -437,7 +479,7 @@ def run(symbol: str, dry_run: bool) -> None:
                         close_market(pos, f"SOFT_SL+FLIP({roe:.1f}%)", dry_run)
                         pos = None; Position.clear(); last_close_time = time.time()
 
-                # Strong opposite signal — early exit
+                # Strong opposite signal — early exit (catches losses too)
                 elif direction not in ("SKIP", pos.side) and abs(score) >= SCORE_THRESHOLD * 1.2:
                     logger.warning("Opposite signal (%s score=%.2f) — early exit  ROE=%.2f%%",
                                    direction, score, roe)
