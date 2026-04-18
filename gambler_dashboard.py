@@ -526,8 +526,8 @@ LOG_TMPL = """<!DOCTYPE html><html>
 def _read_copilot_enabled() -> bool:
     data = _read_json(COPILOT_FILE)
     if data is not None:
-        return bool(data.get("enabled", True))
-    return os.getenv("COPILOT_ENABLED", "true").lower() != "false"
+        return bool(data.get("enabled", False))
+    return False  # default OFF
 
 
 def _write_copilot_enabled(state: bool) -> None:

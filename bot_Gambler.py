@@ -131,10 +131,10 @@ def _copilot_enabled() -> bool:
     try:
         if os.path.exists(COPILOT_FILE):
             with open(COPILOT_FILE) as f:
-                return bool(json.load(f).get("enabled", True))
+                return bool(json.load(f).get("enabled", False))
     except Exception:
         pass
-    return True  # default ON; ปิดได้จาก Dashboard
+    return False  # default OFF; เปิดได้จาก Dashboard (ต้องมี ANTHROPIC_API_KEY)
 
 
 # ── Position dataclass ────────────────────────────────────────────────────────
