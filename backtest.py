@@ -331,6 +331,74 @@ def _print_ascii_chart(series: list[float], width: int = 50, height: int = 8) ->
     print("          +" + "─" * len(pts))
 
 
+# ── TF presets (lookback = 24h worth of bars, min_reset = 1 candle) ───────────
+
+TF_PRESETS: dict[str, dict] = {
+    "1m":  {"lookback": 1440, "min_reset": 60,  "confirm_bars": 3},
+    "3m":  {"lookback": 480,  "min_reset": 180, "confirm_bars": 3},
+    "5m":  {"lookback": 288,  "min_reset": 300, "confirm_bars": 2},
+    "15m": {"lookback": 96,   "min_reset": 900, "confirm_bars": 2},
+    "30m": {"lookback": 48,   "min_reset": 1800,"confirm_bars": 2},
+}
+
+
+def _tf_defaults(tf: str, user_lookback: int, user_min_reset: float, user_confirm: int) -> tuple[int, float, int]:
+    """คืน (lookback, min_reset, confirm_bars) โดย fallback ไป TF preset ถ้า user ไม่ได้ระบุ."""
+    preset = TF_PRESETS.get(tf, TF_PRESETS["5m"])
+    lookback  = user_lookback  if user_lookback  != config.LOOKBACK_BARS              else preset["lookback"]
+    min_reset = user_min_reset if user_min_reset != config.MIN_RESET_INTERVAL_SECONDS else preset["min_reset"]
+    confirm   = user_confirm   if user_confirm   != config.TREND_CONFIRM_BARS         else preset["confirm_bars"]
+    return lookback, min_reset, confirm
+
+
+def _run_one(args, tf: str, capital: float, fee_rate: float) -> BTResult:
+    lookback, min_reset, confirm = _tf_defaults(tf, args.lookback, args.min_reset, args.confirm_bars)
+    return run_backtest(
+        symbol=args.symbol,
+        interval=tf,
+        days=args.days,
+        grid_count=args.grids,
+        usdt_per_grid=args.usdt,
+        leverage=config.LEVERAGE,
+        ema_short=config.EMA_SHORT,
+        ema_long=config.EMA_LONG,
+        rsi_period=config.RSI_PERIOD,
+        ema_min_gap_pct=config.EMA_MIN_GAP_PCT,
+        trend_confirm_bars=confirm,
+        min_reset_interval=min_reset,
+        lookback_bars=lookback,
+        buffer_pct=config.BUFFER_PCT,
+        stop_loss_pct=args.sl,
+        grid_mode=config.GRID_MODE,
+        fee_rate=fee_rate,
+        signal_mode=args.signal_mode,
+        cdc_fast=args.cdc_fast,
+        cdc_slow=args.cdc_slow,
+        cdc_strict=bool(args.cdc_strict),
+    )
+
+
+def print_compare_table(rows: list[dict], capital: float) -> None:
+    """ตารางเปรียบเทียบ TF หลายตัวแบบ side-by-side."""
+    hdr = f"{'TF':<6} {'Fills':>6} {'Resets':>7} {'Gross%':>8} {'Fee%':>7} {'Net%':>8} {'MaxDD%':>8} {'WinRate':>8}"
+    print("\n" + "="*62)
+    print(f"{'COMPARE RESULT':^62}")
+    print("="*62)
+    print(hdr)
+    print("-"*62)
+    best_net = max(r["net_pct"] for r in rows)
+    for r in rows:
+        marker = " <--" if r["net_pct"] == best_net else ""
+        print(
+            f"{r['tf']:<6} {r['fills']:>6} {r['resets']:>7} "
+            f"{r['gross_pct']:>+8.2f} {r['fee_pct']:>7.2f} {r['net_pct']:>+8.2f} "
+            f"{r['dd_pct']:>8.2f} {r['win_rate']:>7.1f}%{marker}"
+        )
+    print("="*62)
+    print(f"  ทุน: ${capital:.2f}  |  leverage: {config.LEVERAGE}x  |  signal: {config.SIGNAL_MODE.upper()}")
+    print("="*62)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -342,59 +410,94 @@ if __name__ == "__main__":
     parser.add_argument("--usdt",    type=float, default=config.USDT_PER_GRID)
     parser.add_argument("--sl",           type=float, default=config.STOP_LOSS_PCT,           help="Stop loss pct (0=ปิด)")
     parser.add_argument("--fee",          type=float, default=0.02,                            help="ค่าธรรมเนียม pct/fill (default 0.02=maker, 0.04=taker)")
-    parser.add_argument("--min-reset",    type=float, default=config.MIN_RESET_INTERVAL_SECONDS, help="วินาทีขั้นต่ำระหว่าง reset (default from config)")
+    parser.add_argument("--min-reset",    type=float, default=config.MIN_RESET_INTERVAL_SECONDS, help="วินาทีขั้นต่ำระหว่าง reset")
     parser.add_argument("--lookback",     type=int,   default=config.LOOKBACK_BARS,            help="จำนวน bars สำหรับคำนวณ range")
     parser.add_argument("--confirm-bars", type=int,   default=config.TREND_CONFIRM_BARS,       help="จำนวน bars ยืนยัน trend ก่อน reset")
     parser.add_argument("--signal-mode",  type=str,   default=config.SIGNAL_MODE,              help="โหมด signal: ema หรือ cdc")
     parser.add_argument("--cdc-fast",     type=int,   default=config.CDC_FAST,                 help="CDC fast EMA period (default 12)")
     parser.add_argument("--cdc-slow",     type=int,   default=config.CDC_SLOW,                 help="CDC slow EMA period (default 26)")
-    parser.add_argument("--cdc-strict",   type=int, choices=[0, 1], default=int(config.CDC_STRICT), help="1=strict BULL zone1 only (default), 0=aggressive zones1-3 BULL")
+    parser.add_argument("--cdc-strict",   type=int, choices=[0, 1], default=int(config.CDC_STRICT), help="1=strict (default), 0=aggressive")
+    parser.add_argument("--compare",      action="store_true",        help="เปรียบเทียบ 3m/5m/15m พร้อมกัน (ใช้ TF preset แต่ละตัว)")
+    parser.add_argument("--compare-tfs",  type=str,   default="",    help="ระบุ TF เองเช่น 3m,5m,15m (ใช้กับ --compare)")
     parser.add_argument("--save",         action="store_true",                                  help="บันทึกผลลง backtest_result.json")
     args = parser.parse_args()
 
     capital = args.grids * args.usdt
     fee_rate = args.fee / 100
 
-    result = run_backtest(
-        symbol=args.symbol,
-        interval=args.tf,
-        days=args.days,
-        grid_count=args.grids,
-        usdt_per_grid=args.usdt,
-        leverage=config.LEVERAGE,
-        ema_short=config.EMA_SHORT,
-        ema_long=config.EMA_LONG,
-        rsi_period=config.RSI_PERIOD,
-        ema_min_gap_pct=config.EMA_MIN_GAP_PCT,
-        trend_confirm_bars=args.confirm_bars,
-        min_reset_interval=args.min_reset,
-        lookback_bars=args.lookback,
-        buffer_pct=config.BUFFER_PCT,
-        stop_loss_pct=args.sl,
-        grid_mode=config.GRID_MODE,
-        fee_rate=fee_rate,
-        signal_mode=args.signal_mode,
-        cdc_fast=args.cdc_fast,
-        cdc_slow=args.cdc_slow,
-        cdc_strict=bool(args.cdc_strict),
-    )
+    if args.compare:
+        tfs = [t.strip() for t in args.compare_tfs.split(",")] if args.compare_tfs else ["3m", "5m", "15m"]
+        compare_rows: list[dict] = []
+        all_results: dict[str, BTResult] = {}
+        for tf in tfs:
+            r = _run_one(args, tf, capital, fee_rate)
+            all_results[tf] = r
+            compare_rows.append({
+                "tf":        tf,
+                "fills":     r.total_fills,
+                "resets":    r.resets,
+                "gross_pct": r.realized_profit / capital * 100 if capital else 0,
+                "fee_pct":   r.total_fees      / capital * 100 if capital else 0,
+                "net_pct":   r.net_profit      / capital * 100 if capital else 0,
+                "dd_pct":    r.max_drawdown    / capital * 100 if capital else 0,
+                "win_rate":  (r.sell_fills / r.total_fills * 100) if r.total_fills else 0,
+            })
+        print_compare_table(compare_rows, capital)
 
-    print_report(result, capital, fee_rate)
+        # แสดง P&L chart ของทุก TF ต่อกัน
+        for tf in tfs:
+            r = all_results[tf]
+            if r.pnl_series:
+                print(f"\n  P&L Chart — {tf}:")
+                _print_ascii_chart(r.pnl_series)
 
-    if args.save:
-        out = {
-            "symbol": args.symbol, "tf": args.tf, "days": args.days,
-            "capital": capital, "fills": result.total_fills,
-            "gross_profit": round(result.realized_profit, 4),
-            "total_fees": round(result.total_fees, 4),
-            "net_profit": round(result.net_profit, 4),
-            "net_profit_pct": round(result.net_profit / capital * 100, 2) if capital else 0,
-            "max_drawdown": round(result.max_drawdown, 4),
-            "max_drawdown_at": result.max_drawdown_at,
-            "peak_profit_at": result.peak_profit_at,
-            "resets": result.resets,
-            "fill_log": result.fill_log,
-        }
-        with open("backtest_result.json", "w") as f:
-            json.dump(out, f, indent=2)
-        print("\n💾 บันทึกผลลง backtest_result.json")
+        if args.save:
+            out = {"symbol": args.symbol, "days": args.days, "capital": capital, "compare": compare_rows}
+            with open("backtest_result.json", "w") as f:
+                json.dump(out, f, indent=2)
+            print("\n[save] backtest_result.json")
+    else:
+        lookback, min_reset, confirm = _tf_defaults(args.tf, args.lookback, args.min_reset, args.confirm_bars)
+        result = run_backtest(
+            symbol=args.symbol,
+            interval=args.tf,
+            days=args.days,
+            grid_count=args.grids,
+            usdt_per_grid=args.usdt,
+            leverage=config.LEVERAGE,
+            ema_short=config.EMA_SHORT,
+            ema_long=config.EMA_LONG,
+            rsi_period=config.RSI_PERIOD,
+            ema_min_gap_pct=config.EMA_MIN_GAP_PCT,
+            trend_confirm_bars=confirm,
+            min_reset_interval=min_reset,
+            lookback_bars=lookback,
+            buffer_pct=config.BUFFER_PCT,
+            stop_loss_pct=args.sl,
+            grid_mode=config.GRID_MODE,
+            fee_rate=fee_rate,
+            signal_mode=args.signal_mode,
+            cdc_fast=args.cdc_fast,
+            cdc_slow=args.cdc_slow,
+            cdc_strict=bool(args.cdc_strict),
+        )
+
+        print_report(result, capital, fee_rate)
+
+        if args.save:
+            out = {
+                "symbol": args.symbol, "tf": args.tf, "days": args.days,
+                "capital": capital, "fills": result.total_fills,
+                "gross_profit": round(result.realized_profit, 4),
+                "total_fees": round(result.total_fees, 4),
+                "net_profit": round(result.net_profit, 4),
+                "net_profit_pct": round(result.net_profit / capital * 100, 2) if capital else 0,
+                "max_drawdown": round(result.max_drawdown, 4),
+                "max_drawdown_at": result.max_drawdown_at,
+                "peak_profit_at": result.peak_profit_at,
+                "resets": result.resets,
+                "fill_log": result.fill_log,
+            }
+            with open("backtest_result.json", "w") as f:
+                json.dump(out, f, indent=2)
+            print("\n[save] backtest_result.json")
