@@ -73,6 +73,8 @@ POLL_INTERVAL    = 30        # seconds
 SCORE_THRESHOLD  = 3.5       # minimum |score| to enter (out of ~11 max)
 COOLDOWN_SECS    = 300       # 5 min between trades after any close
 STATE_FILE       = "gambler_state.json"
+LIVE_FILE        = "gambler_live.json"
+COPILOT_ENABLED  = os.getenv("COPILOT_ENABLED", "true").lower() != "false"
 
 # ── Dynamic profit-taking (when trend changes, don't wait for full TP) ───────
 # Trailing stop: once ROE peaked at >= TRAIL_ACTIVATE, exit when we give back
@@ -370,6 +372,27 @@ def _bar(score: float, width: int = 20) -> str:
         return " " * (half - filled) + "█" * filled + " " * half
 
 
+def _save_live(price: float, direction: str, score: float, details: dict,
+               cooldown_left: float, copilot: Optional[dict] = None) -> None:
+    """Write lightweight state snapshot for the web dashboard."""
+    try:
+        data: dict = {
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": config.SYMBOL,
+            "price": price,
+            "direction": direction,
+            "score": round(score, 3),
+            "cooldown_left": round(cooldown_left, 0),
+            "details": {tf: {k: v for k, v in d.items()} for tf, d in details.items()},
+        }
+        if copilot:
+            data["copilot"] = copilot
+        with open(LIVE_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as exc:
+        logger.debug("_save_live error: %s", exc)
+
+
 def print_dashboard(pos: Optional[Position], price: float, score: float,
                     direction: str, details: dict, cooldown_left: float) -> None:
     ts = time.strftime("%H:%M:%S")
@@ -487,9 +510,27 @@ def run(symbol: str, dry_run: bool) -> None:
                     pos = None; Position.clear(); last_close_time = time.time()
 
             # ── Enter new position ────────────────────────────────────────
+            copilot_result: Optional[dict] = None
             if pos is None and direction != "SKIP" and cooldown_left == 0:
                 balance = binance.get_balance("USDT")
                 margin  = balance * CAPITAL_PCT
+
+                # Co-pilot: scale margin by AI confidence (0.5× – 1.5×)
+                if COPILOT_ENABLED:
+                    try:
+                        from ai_copilot import evaluate_trade as _cp_eval
+                        copilot_result = _cp_eval(direction, score, details, price, atr_5m)
+                        confidence = copilot_result.get("confidence", 60)
+                        multiplier = 0.5 + (confidence / 100.0) * 1.0
+                        margin = margin * multiplier
+                        logger.info(
+                            "CO-PILOT: confidence=%d%% quality=%s → margin=$%.2f (×%.2f) | %s",
+                            confidence, copilot_result.get("quality", "?"),
+                            margin, multiplier, copilot_result.get("reasoning", ""),
+                        )
+                    except Exception as cp_exc:
+                        logger.warning("CO-PILOT failed: %s — using base margin", cp_exc)
+
                 if margin * LEVERAGE < 5:
                     logger.warning("Notional too small ($%.2f) — need balance > $%.2f",
                                    margin * LEVERAGE, 5 / LEVERAGE / CAPITAL_PCT)
@@ -525,6 +566,7 @@ def run(symbol: str, dry_run: bool) -> None:
                     reason = f"cooldown {cooldown_left:.0f}s" if cooldown_left > 0 else f"score={score:+.2f}"
                     logger.info("Waiting: %s  (streak=%d)", reason, skip_streak)
 
+            _save_live(price, direction, score, details, cooldown_left, copilot_result)
             print_dashboard(pos, price, score, direction, details, cooldown_left)
 
         except KeyboardInterrupt:
