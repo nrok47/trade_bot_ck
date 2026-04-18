@@ -21,6 +21,14 @@ import signal
 import sys
 import time
 
+# Windows cmd/PowerShell ใช้ cp1252 ซึ่งไม่รองรับ Unicode symbols — force UTF-8
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
+
 from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
