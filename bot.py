@@ -545,7 +545,8 @@ def run() -> None:
     _heartbeat_interval = max(1, int(60 / config.POLL_INTERVAL_SECONDS))  # ทุก ~60 วินาที
     _last_cooldown_direction: str = ""
 
-    with Live(console=console, refresh_per_second=0.5, screen=True) as live:
+    try:
+      with Live(console=console, refresh_per_second=0.5, screen=True) as live:
         while _running:
             cycle += 1
             current_price = binance.get_price()
@@ -780,6 +781,17 @@ def run() -> None:
                 if not _running:
                     break
                 time.sleep(1)
+
+    except Exception as exc:
+        logger.critical("UNHANDLED EXCEPTION — หยุดบอทฉุกเฉิน: %s", exc, exc_info=True)
+        console.print(f"\n[bold red]💥 ERROR: {exc}[/bold red]")
+        console.print("[red]กำลังยกเลิก orders และปิด positions ฉุกเฉิน...[/red]")
+        try:
+            binance.cancel_all_open_orders()
+            if config.is_futures:
+                binance.close_all_positions()
+        except Exception as cleanup_exc:
+            logger.error("Emergency cleanup failed: %s", cleanup_exc)
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     state_manager.save_state(engine, grid_range, current_direction, regrid_count, cycle)
