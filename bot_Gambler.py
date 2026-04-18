@@ -70,9 +70,17 @@ TP_ROE_PCT       = 30.0      # target ROE%
 SL_SOFT_ROE_PCT  = 10.0      # soft stop ROE% → trend re-check
 SL_HARD_ROE_PCT  = 30.0      # hard stop ROE% → force close
 POLL_INTERVAL    = 30        # seconds
-SCORE_THRESHOLD  = 3.5       # minimum |score| to enter (out of ~11)
+SCORE_THRESHOLD  = 3.5       # minimum |score| to enter (out of ~11 max)
 COOLDOWN_SECS    = 300       # 5 min between trades after any close
 STATE_FILE       = "gambler_state.json"
+
+# ── Signal thresholds (independent from grid bot config) ──────────────────────
+# EMA gap: lower than grid bot (0.1%) — grid needs stricter filter to avoid resets;
+# gambler only needs to detect trend, 0.03% is enough to avoid flat-line noise.
+EMA_GAP_PCT      = 0.03   # % gap EMA_SHORT vs EMA_LONG to count as trend signal
+RSI_OVERSOLD     = 40     # RSI below this → bullish pressure   (grid uses 35, too strict)
+RSI_OVERBOUGHT   = 60     # RSI above this → bearish pressure   (grid uses 65, too strict)
+VOL_SURGE_MULT   = 2.0    # volume must be N× 20-bar avg to count as surge
 
 # TF config: limit = 12h of candles  |  weight: 15m counts most
 TF_CONFIG: dict[str, dict] = {
@@ -146,10 +154,10 @@ def _score_tf(candles: CandleData, weight: float) -> tuple[float, dict]:
     if ema_s_vals and ema_l_vals:
         es, el = ema_s_vals[-1], ema_l_vals[-1]
         gap = (es - el) / el * 100 if el else 0
-        if gap > config.EMA_MIN_GAP_PCT:
+        if gap > EMA_GAP_PCT:
             score += 1.0 * weight
             info["ema"] = f"BULL gap={gap:.3f}%"
-        elif gap < -config.EMA_MIN_GAP_PCT:
+        elif gap < -EMA_GAP_PCT:
             score -= 1.0 * weight
             info["ema"] = f"BEAR gap={gap:.3f}%"
         else:
@@ -157,10 +165,10 @@ def _score_tf(candles: CandleData, weight: float) -> tuple[float, dict]:
 
     # 2. RSI
     rsi_val = calc_rsi(closes, config.RSI_PERIOD)
-    if rsi_val < 35:
+    if rsi_val < RSI_OVERSOLD:
         score += 0.8 * weight
         info["rsi"] = f"OVERSOLD {rsi_val:.1f}"
-    elif rsi_val > 65:
+    elif rsi_val > RSI_OVERBOUGHT:
         score -= 0.8 * weight
         info["rsi"] = f"OVERBOUGHT {rsi_val:.1f}"
     else:
@@ -184,7 +192,7 @@ def _score_tf(candles: CandleData, weight: float) -> tuple[float, dict]:
         avg_vol = sum(volumes[-21:-1]) / 20
         if avg_vol > 0:
             vol_ratio = volumes[-1] / avg_vol
-            if vol_ratio >= 2.0:
+            if vol_ratio >= VOL_SURGE_MULT:
                 score *= 1.3
                 info["vol"] = f"SURGE x{vol_ratio:.1f}"
             else:
