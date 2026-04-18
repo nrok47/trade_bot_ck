@@ -575,7 +575,7 @@ _RE_CLOSE = re.compile(
 _RE_CLOSE_DRY = re.compile(
     r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?\[DRY\] CLOSE (LONG|SHORT).*?reason=(\S+)"
 )
-_RE_ROE = re.compile(r"\(([+-]?\d+\.?\d*)%\)")
+_RE_ROE = re.compile(r"([+-]?\d+\.?\d*)%\)")
 
 _WIN_PREFIXES = ("TP(", "TRAIL(", "FLIP_TP(")
 _LOSS_PREFIXES = ("HARD_SL(", "SOFT_SL", "EARLY_EXIT(")
