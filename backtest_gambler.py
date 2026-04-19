@@ -178,7 +178,8 @@ _WIN_REASONS = ("TP", "TRAIL", "FLIP_TP")
 def _metrics(trades: list[dict], equity_curve: list[float]) -> dict:
     if not trades:
         return {k: 0 for k in (
-            "total wins losses win_rate long_win_rate short_win_rate "
+            "total wins losses long_total short_total long_wins short_wins "
+            "long_losses short_losses win_rate long_win_rate short_win_rate "
             "total_roe avg_roe profit_factor expectancy "
             "max_drawdown max_dd_duration sharpe sortino"
         ).split()}
@@ -309,6 +310,14 @@ def run_backtest(symbol: str, days: int, threshold: float,
 
     print(f"Simulating {n - WARMUP_5M} bars …", flush=True)
 
+    def _slice(candles: CandleData, start: int, end: int) -> CandleData:
+        s = max(0, start)
+        return CandleData(
+            candles.opens[s:end+1],  candles.highs[s:end+1],
+            candles.lows[s:end+1],   candles.closes[s:end+1],
+            candles.volumes[s:end+1],
+        )
+
     for i in range(WARMUP_5M, n):
         ts_cur = t5[i]
         o5, h5, l5, c5_price = (
@@ -320,14 +329,6 @@ def run_backtest(symbol: str, days: int, threshold: float,
         j15 = bisect.bisect_right(t15, ts_cur) - 1
         j3  = max(j3,  0)
         j15 = max(j15, 0)
-
-        def _slice(candles: CandleData, start: int, end: int) -> CandleData:
-            s = max(0, start)
-            return CandleData(
-                candles.opens[s:end+1],  candles.highs[s:end+1],
-                candles.lows[s:end+1],   candles.closes[s:end+1],
-                candles.volumes[s:end+1],
-            )
 
         sl3  = _slice(c3,  j3  - TF_LIMITS["3m"]  + 1, j3)
         sl5  = _slice(c5,  i   - TF_LIMITS["5m"]  + 1, i)
@@ -354,8 +355,13 @@ def run_backtest(symbol: str, days: int, threshold: float,
             hold = i - pos_bar
 
             if sl_hit:
+                # If bar opened past SL (gap), fill at open (worse than SL level)
+                if pos_side == "LONG":
+                    sl_fill = min(o5, pos_sl_h)
+                else:
+                    sl_fill = max(o5, pos_sl_h)
                 _close_pos(trades, equity_curve, equity_ts, pos_side, pos_bar,
-                           t5, pos_entry, pos_sl_h, "HARD_SL", hold, ts_cur, lev)
+                           t5, pos_entry, sl_fill, "HARD_SL", hold, ts_cur, lev)
                 pos_side = None;  last_close_bar = i;  closed_this_bar = True
 
             elif tp_hit:
