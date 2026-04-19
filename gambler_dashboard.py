@@ -195,7 +195,7 @@ DASH_TMPL = """<!DOCTYPE html><html>
       <span class="gray" style="font-size:11px">SHORT</span>
       <div class="score-bar-bg">
         <div class="score-bar-center"></div>
-        {% set pct = [[(live.score / 11 * 50)|abs, 50]|min, 0]|max %}
+        {% set pct = [[(live.score / 15 * 50)|abs, 50]|min, 0]|max %}
         {% if live.score >= 0 %}
         <div class="score-bar-fill"
              style="left:50%;width:{{ pct }}%;background:#3fb950"></div>
@@ -210,7 +210,7 @@ DASH_TMPL = """<!DOCTYPE html><html>
     <!-- TF breakdown chips -->
     {% if live.details %}
     <div class="tf-row">
-      {% for tf, d in live.details.items() %}
+      {% for tf, d in live.details.items() %}{% if tf != 'fng' %}
       <div class="tf-chip">
         <b>{{ tf }}</b>
         <span class="{{ 'green' if d.score > 0 else ('red' if d.score < 0 else 'gray') }}">
@@ -218,9 +218,32 @@ DASH_TMPL = """<!DOCTYPE html><html>
         </span>
         &nbsp;EMA:{{ d.ema|truncate(16,true,'') if d.ema else '?' }}
         &nbsp;RSI:{{ d.rsi if d.rsi else '?' }}
+        {% if d.cdc %}&nbsp;CDC:{{ d.cdc[:4] }}{% endif %}
       </div>
-      {% endfor %}
+      {% endif %}{% endfor %}
     </div>
+
+    <!-- Fear & Greed chip -->
+    {% if live.details.fng %}
+    {% set fg = live.details.fng %}
+    <div class="tf-row" style="margin-top:4px">
+      <div class="tf-chip" style="border-left:2px solid {{ '#3fb950' if fg.score > 0 else ('#f85149' if fg.score < 0 else '#555') }};padding-left:8px">
+        <b>Fear &amp; Greed</b>
+        &nbsp;
+        <span style="font-size:16px;font-weight:bold;color:{{ '#3fb950' if fg.score > 0 else ('#f85149' if fg.score < 0 else '#8b949e') }}">
+          {{ fg.value }}
+        </span>
+        &nbsp;
+        <span class="{{ 'green' if fg.score > 0 else ('red' if fg.score < 0 else 'gray') }}">
+          {{ fg.label }}
+        </span>
+        &nbsp;
+        <span class="badge {{ 'b-green' if fg.score > 0 else ('b-red' if fg.score < 0 else 'b-gray') }}">
+          score {{ '%+.1f'|format(fg.score) }}
+        </span>
+      </div>
+    </div>
+    {% endif %}
     {% endif %}
 
     {% if live.copilot %}
@@ -544,7 +567,7 @@ _SETTINGS_DEFAULTS: dict = {
     "leverage":        8,
     "tp_roe_pct":      30.0,
     "sl_hard_roe_pct": 30.0,
-    "score_threshold": 3.5,
+    "score_threshold": 2.5,
 }
 
 
@@ -655,6 +678,9 @@ def dashboard():
             obj.score = d.get("score", 0)
             obj.ema   = d.get("ema", "")
             obj.rsi   = d.get("rsi", "")
+            obj.cdc   = d.get("cdc", "")
+            obj.value = d.get("value", None)   # F&G index value
+            obj.label = d.get("label", "")
             details_wrapped[tf] = obj
         live["details"] = details_wrapped
 

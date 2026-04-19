@@ -353,6 +353,75 @@ def cdc_action_zone(
     return CDCZone(zone=zone, name=name, direction=direction, fast_ema=f, slow_ema=s, price=p)
 
 
+# ── ADX (Average Directional Index) ──────────────────────────────────────────
+
+@dataclass
+class ADXResult:
+    adx:      float   # 0–100; > 25 trending, < 20 ranging
+    plus_di:  float   # +DI line
+    minus_di: float   # -DI line
+
+
+def adx(
+    highs:  Sequence[float],
+    lows:   Sequence[float],
+    closes: Sequence[float],
+    period: int = 14,
+) -> ADXResult:
+    """
+    Wilder's ADX.
+    ADX > 25 → trending  |  ADX 20-25 → weak  |  ADX < 20 → ranging/sideways
+    +DI > -DI → bullish pressure  |  -DI > +DI → bearish pressure
+    """
+    if len(closes) < period * 2 + 1:
+        return ADXResult(20.0, 25.0, 25.0)
+
+    trs, plus_dms, minus_dms = [], [], []
+    for i in range(1, len(closes)):
+        tr = max(highs[i] - lows[i],
+                 abs(highs[i] - closes[i - 1]),
+                 abs(lows[i]  - closes[i - 1]))
+        up   = highs[i] - highs[i - 1]
+        down = lows[i - 1] - lows[i]
+        trs.append(tr)
+        plus_dms.append(up   if up > down and up > 0   else 0.0)
+        minus_dms.append(down if down > up and down > 0 else 0.0)
+
+    def _wilder(vals: list[float], n: int) -> list[float]:
+        if len(vals) < n:
+            return []
+        result = [sum(vals[:n])]
+        for v in vals[n:]:
+            result.append(result[-1] - result[-1] / n + v)
+        return result
+
+    s_tr  = _wilder(trs,       period)
+    s_pdm = _wilder(plus_dms,  period)
+    s_mdm = _wilder(minus_dms, period)
+
+    dx_vals = []
+    for i in range(len(s_tr)):
+        if s_tr[i] == 0:
+            continue
+        pdi = 100 * s_pdm[i] / s_tr[i]
+        mdi = 100 * s_mdm[i] / s_tr[i]
+        denom = pdi + mdi
+        dx_vals.append(100 * abs(pdi - mdi) / denom if denom > 0 else 0.0)
+
+    adx_vals = _wilder(dx_vals, period)
+    if not adx_vals or not s_tr:
+        return ADXResult(20.0, 25.0, 25.0)
+
+    last_tr = s_tr[-1]
+    pdi_last = 100 * s_pdm[-1] / last_tr if last_tr else 25.0
+    mdi_last = 100 * s_mdm[-1] / last_tr if last_tr else 25.0
+    return ADXResult(
+        adx=round(adx_vals[-1], 2),
+        plus_di=round(pdi_last, 2),
+        minus_di=round(mdi_last, 2),
+    )
+
+
 # ── Lookback High / Low ───────────────────────────────────────────────────────
 
 def lookback_high_low(

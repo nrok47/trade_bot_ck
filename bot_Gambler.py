@@ -34,6 +34,7 @@ import math
 import os
 import sys
 import time
+import requests
 from dataclasses import dataclass, asdict
 from typing import Optional
 
@@ -47,6 +48,7 @@ from binance_client import binance
 from config import config
 from indicators import (
     CandleData, ema, rsi as calc_rsi, atr as calc_atr, bollinger_bands,
+    adx as calc_adx,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -76,15 +78,34 @@ SL_SOFT_ROE_PCT  = 10.0    # Soft SL: re-check trend แล้วค่อยต
 SL_HARD_ROE_PCT  = 30.0    # Hard SL: ปิดทันทีไม่มีข้อแม้
 
 # ── Strategy Tuning ───────────────────────────────────────────────────────────
-SCORE_THRESHOLD  = 3.5     # คะแนนขั้นต่ำก่อนเปิดไม้ (max ~11)
+SCORE_THRESHOLD  = 2.5     # คะแนนขั้นต่ำก่อนเปิดไม้ (max ~15)  ลดจาก 3.5 → 2.5 เพื่อเข้าบ่อยขึ้น ~30%
 EMA_GAP_PCT      = 0.03    # % ช่องว่าง EMA9/21 ถึงนับเป็น trend
 RSI_OVERSOLD     = 40      # RSI ต่ำกว่านี้ → bullish signal
 RSI_OVERBOUGHT   = 60      # RSI สูงกว่านี้ → bearish signal
 VOL_SURGE_MULT   = 2.0     # volume ต้องสูงกว่า avg × ค่านี้ ถึงนับ surge
 
+# ── Fear & Greed Index (Trinity layer) ───────────────────────────────────────
+FNG_WEIGHT        = 2.0    # max score ±2.0 จาก F&G
+FNG_EXTREME_FEAR  = 25     # ≤ นี้ → contrarian BUY signal
+FNG_EXTREME_GREED = 75     # ≥ นี้ → contrarian SELL signal
+FNG_CACHE_SECS    = 300    # cache API call 5 นาที
+
+_fng_cache: tuple[float, int] = (0.0, 50)  # (timestamp, value)
+
 # ── Timing ────────────────────────────────────────────────────────────────────
 POLL_INTERVAL    = 30      # วินาที ระหว่างแต่ละรอบ
 COOLDOWN_SECS    = 300     # วินาที รอหลังปิดไม้ก่อนจะเปิดใหม่
+
+# ── Guardrails (ล็อคความเสี่ยง — ข้ามไม่ได้) ─────────────────────────────────
+MAX_SESSION_LOSS_USDT = 20.0  # หยุดเทรดถ้าขาดทุนสะสม (session) เกิน $20
+MAX_TRADES_PER_HOUR   = 3     # สูงสุด 3 ไม้ต่อชั่วโมง ป้องกัน churn
+
+# ── Regime Detection (ADX + Hurst) ───────────────────────────────────────────
+ADX_TRENDING   = 25     # ADX > นี้ = trend แรง
+ADX_WEAK       = 20     # ADX 20-25 = trend อ่อน
+ADX_RANGING    = 15     # ADX < นี้ = ranging แน่นอน
+HURST_RANGING  = 0.45   # H < นี้ = mean-reverting / ranging
+HURST_TRENDING = 0.55   # H > นี้ = trending
 
 # ── Dynamic Exit Rules ────────────────────────────────────────────────────────
 TRAIL_ACTIVATE_ROE    = 10.0  # เปิด trailing หลัง ROE peak ≥ ค่านี้
@@ -112,7 +133,7 @@ _SETTINGS_DEFAULTS = {
     "leverage":        LEVERAGE,
     "tp_roe_pct":      TP_ROE_PCT,
     "sl_hard_roe_pct": SL_HARD_ROE_PCT,
-    "score_threshold": SCORE_THRESHOLD,
+    "score_threshold": SCORE_THRESHOLD,  # 2.5
 }
 
 
@@ -183,6 +204,95 @@ class Position:
             os.remove(STATE_FILE)
 
 
+# ── Fear & Greed helpers ──────────────────────────────────────────────────────
+
+def _fng_label(v: int) -> str:
+    if v <= 25: return "Extreme Fear"
+    if v <= 45: return "Fear"
+    if v <= 55: return "Neutral"
+    if v <= 75: return "Greed"
+    return "Extreme Greed"
+
+
+def get_fear_and_greed() -> int:
+    """Fetch F&G index with 5-min cache. Returns cached/50 on error."""
+    global _fng_cache
+    if time.time() - _fng_cache[0] < FNG_CACHE_SECS:
+        return _fng_cache[1]
+    try:
+        r = requests.get("https://api.alternative.me/fng/", timeout=5).json()
+        val = int(r["data"][0]["value"])
+        _fng_cache = (time.time(), val)
+        logger.debug("F&G updated: %d (%s)", val, _fng_label(val))
+        return val
+    except Exception as exc:
+        logger.debug("F&G fetch failed: %s — using cached %d", exc, _fng_cache[1])
+        return _fng_cache[1] or 50
+
+
+# ── Hurst Exponent ────────────────────────────────────────────────────────────
+
+def hurst_exponent(prices: list[float], min_lag: int = 2, max_lag: int = 20) -> float:
+    """
+    Estimate Hurst exponent via variance of log-returns at multiple lags.
+    H > 0.55 → trending  |  H ≈ 0.5 → random walk  |  H < 0.45 → ranging/mean-reverting
+    """
+    if len(prices) < max_lag + 2:
+        return 0.5
+    try:
+        log_rets = [math.log(prices[i] / prices[i-1])
+                    for i in range(1, len(prices)) if prices[i-1] > 0]
+        lags = list(range(min_lag, min(max_lag, len(log_rets) // 2)))
+        if len(lags) < 3:
+            return 0.5
+        log_lags, log_stds = [], []
+        for lag in lags:
+            diffs = [log_rets[i + lag] - log_rets[i] for i in range(len(log_rets) - lag)]
+            var = sum(d * d for d in diffs) / len(diffs)
+            if var > 0:
+                log_lags.append(math.log(lag))
+                log_stds.append(math.log(var) / 2)   # log(std) = log(var)/2
+        n = len(log_lags)
+        if n < 2:
+            return 0.5
+        mx = sum(log_lags) / n
+        my = sum(log_stds)  / n
+        num = sum((log_lags[i] - mx) * (log_stds[i] - my) for i in range(n))
+        den = sum((log_lags[i] - mx) ** 2 for i in range(n))
+        return round(num / den, 4) if den != 0 else 0.5
+    except Exception:
+        return 0.5
+
+
+# ── Regime Detection ─────────────────────────────────────────────────────────
+
+def detect_regime(adx_val: float, hurst_val: float) -> tuple[str, float]:
+    """
+    Combine ADX + Hurst → (regime_label, threshold_multiplier).
+
+    | Regime         | ADX         | Hurst        | Mult |
+    |----------------|-------------|--------------|------|
+    | TRENDING       | > 25        | > 0.55       | 1.0  |
+    | TRENDING       | > 25        | any          | 1.0  |
+    | WEAK_TREND     | 20–25       | any          | 1.2  |
+    | RANGING        | < 20 or H<0.45 | —         | 1.4  |
+    | RANGING_STRONG | < 15 and H<0.45 | —        | 1.6  |
+
+    Higher multiplier = harder threshold = fewer (better quality) entries.
+    """
+    strong_ranging = adx_val < ADX_RANGING and hurst_val < HURST_RANGING
+    any_ranging    = adx_val < ADX_WEAK    or  hurst_val < HURST_RANGING
+
+    if strong_ranging:
+        return "RANGING_STRONG", 1.6
+    elif any_ranging:
+        return "RANGING", 1.4
+    elif adx_val < ADX_TRENDING:
+        return "WEAK_TREND", 1.2
+    else:
+        return "TRENDING", 1.0
+
+
 # ── Scoring per timeframe ─────────────────────────────────────────────────────
 
 def _score_tf(candles: CandleData, weight: float) -> tuple[float, dict]:
@@ -213,6 +323,18 @@ def _score_tf(candles: CandleData, weight: float) -> tuple[float, dict]:
             info["ema"] = f"BEAR gap={gap:.3f}%"
         else:
             info["ema"] = f"NEUTRAL gap={gap:.3f}%"
+
+    # 1b. CDC Action Zone (EMA 12/26) — backbone trend confirmation
+    cdc_s_vals = ema(closes, 12)
+    cdc_l_vals = ema(closes, 26)
+    if cdc_s_vals and cdc_l_vals:
+        cs, cl = cdc_s_vals[-1], cdc_l_vals[-1]
+        if cs > cl:
+            score += 0.5 * weight
+            info["cdc"] = f"BULL {cs:.4f}>{cl:.4f}"
+        else:
+            score -= 0.5 * weight
+            info["cdc"] = f"BEAR {cs:.4f}<{cl:.4f}"
 
     # 2. RSI
     rsi_val = calc_rsi(closes, config.RSI_PERIOD)
@@ -265,6 +387,7 @@ def compute_signal(symbol: str, threshold: float = SCORE_THRESHOLD) -> tuple[str
     total = 0.0
     details: dict = {}
     atr_5m = 0.0
+    candles_15m_ref = None
 
     for tf, cfg in TF_CONFIG.items():
         candles = binance.get_klines(symbol, tf, cfg["limit"])
@@ -277,10 +400,48 @@ def compute_signal(symbol: str, threshold: float = SCORE_THRESHOLD) -> tuple[str
         details[tf] = {"score": round(sc, 3), **info}
         if tf == "5m":
             atr_5m = info.get("atr", 0.0)
+        if tf == "15m":
+            candles_15m_ref = candles
 
-    if total >= threshold:
+    # Fear & Greed Index — contrarian psychology filter (Trinity layer)
+    fng = get_fear_and_greed()
+    fng_score = 0.0
+    if fng <= FNG_EXTREME_FEAR:
+        fng_score = FNG_WEIGHT    # Extreme Fear = contrarian buy signal
+    elif fng >= FNG_EXTREME_GREED:
+        fng_score = -FNG_WEIGHT   # Extreme Greed = contrarian sell signal
+    total += fng_score
+    details["fng"] = {"score": round(fng_score, 2), "value": fng, "label": _fng_label(fng)}
+
+    # Regime Detection — ADX + Hurst from 15m candles
+    hurst_val  = 0.5
+    adx_val    = 20.0
+    plus_di    = 25.0
+    minus_di   = 25.0
+    if candles_15m_ref:
+        hurst_val = hurst_exponent(candles_15m_ref.closes)
+        adx_res   = calc_adx(candles_15m_ref.highs, candles_15m_ref.lows,
+                              candles_15m_ref.closes, 14)
+        adx_val, plus_di, minus_di = adx_res.adx, adx_res.plus_di, adx_res.minus_di
+
+    regime, regime_mult = detect_regime(adx_val, hurst_val)
+    details["regime"] = {
+        "label":    regime,
+        "mult":     regime_mult,
+        "adx":      round(adx_val, 1),
+        "plus_di":  round(plus_di, 1),
+        "minus_di": round(minus_di, 1),
+        "hurst":    round(hurst_val, 3),
+    }
+
+    eff_threshold = threshold * regime_mult
+    if regime_mult != 1.0:
+        logger.debug("Regime=%s ADX=%.1f H=%.3f → threshold %.2f → %.2f",
+                     regime, adx_val, hurst_val, threshold, eff_threshold)
+
+    if total >= eff_threshold:
         direction = "LONG"
-    elif total <= -threshold:
+    elif total <= -eff_threshold:
         direction = "SHORT"
     else:
         direction = "SKIP"
@@ -411,7 +572,8 @@ def _bar(score: float, width: int = 20) -> str:
 
 
 def _save_live(price: float, direction: str, score: float, details: dict,
-               cooldown_left: float, copilot: Optional[dict] = None) -> None:
+               cooldown_left: float, copilot: Optional[dict] = None,
+               guards: Optional[dict] = None) -> None:
     """Write lightweight state snapshot for the web dashboard."""
     try:
         data: dict = {
@@ -425,6 +587,8 @@ def _save_live(price: float, direction: str, score: float, details: dict,
         }
         if copilot:
             data["copilot"] = copilot
+        if guards:
+            data["guards"] = guards
         with open(LIVE_FILE, "w") as f:
             json.dump(data, f)
 
@@ -434,6 +598,7 @@ def _save_live(price: float, direction: str, score: float, details: dict,
             "3m":    round(details.get("3m",  {}).get("score", 0), 3),
             "5m":    round(details.get("5m",  {}).get("score", 0), 3),
             "15m":   round(details.get("15m", {}).get("score", 0), 3),
+            "fng":   round(details.get("fng", {}).get("score", 0), 2),
             "total": round(score, 3),
         }
         try:
@@ -454,16 +619,27 @@ def _save_live(price: float, direction: str, score: float, details: dict,
 
 
 def print_dashboard(pos: Optional[Position], price: float, score: float,
-                    direction: str, details: dict, cooldown_left: float) -> None:
+                    direction: str, details: dict, cooldown_left: float,
+                    guards: Optional[dict] = None) -> None:
     ts = time.strftime("%H:%M:%S")
     arrow = {"LONG": "▲", "SHORT": "▼", "SKIP": "◆"}.get(direction, "?")
     bar = _bar(score)
 
+    reg = details.get("regime", {})
+    hurst_tag = (f"  [{reg.get('label','?')}  ADX={reg.get('adx',0):.0f}"
+                 f"  H={reg.get('hurst',0.5):.3f}  mult×{reg.get('mult',1.0):.1f}]") if reg else ""
+
     print(f"\n{'='*62}")
-    print(f"  {ts}  {config.SYMBOL}  ${price:.4f}  [GAMBLER 8x  cap={CAPITAL_PCT*100:.0f}%]")
+    print(f"  {ts}  {config.SYMBOL}  ${price:.4f}  [GAMBLER 8x  cap={CAPITAL_PCT*100:.0f}%]{hurst_tag}")
     print(f"  Score [{bar}] {score:+.2f}  →  {arrow} {direction}")
     if cooldown_left > 0:
         print(f"  Cooldown: {cooldown_left:.0f}s remaining")
+    if guards:
+        blocked = guards.get("blocked_reason", "")
+        pnl_str = f"session_pnl=${guards.get('session_pnl', 0):+.2f}"
+        hr_str  = f"trades/hr={guards.get('trades_this_hour', 0)}/{MAX_TRADES_PER_HOUR}"
+        status  = f"  [GUARDRAIL BLOCKED: {blocked}]" if blocked else ""
+        print(f"  Guards: {pnl_str}  {hr_str}{status}")
 
     if pos:
         roe = pos.roe(price)
@@ -478,8 +654,12 @@ def print_dashboard(pos: Optional[Position], price: float, score: float,
     else:
         print(f"  No open position")
 
+    fng_d = details.get("fng", {})
     print(f"  ── TF breakdown ──────────────────────────────────────────")
+    print(f"  F&G Index: {fng_d.get('value', 50)}  ({fng_d.get('label','?')})  score={fng_d.get('score', 0):+.2f}")
     for tf, d in details.items():
+        if tf in ("fng", "hurst", "regime"):
+            continue
         wt = TF_CONFIG[tf]["weight"]
         print(f"  {tf} (w={wt:.1f}) score={d.get('score',0):+.3f}"
               f"  EMA:{d.get('ema','?')[:16]}  RSI:{d.get('rsi','?')[:18]}")
@@ -500,6 +680,10 @@ def run(symbol: str, dry_run: bool) -> None:
     last_close_time: float = 0.0
     skip_streak = 0
 
+    # Guardrail state (resets on restart)
+    session_pnl: float = 0.0         # cumulative closed P&L this session (USDT)
+    trade_log:   list[float] = []    # timestamps of all entries (for hourly freq check)
+
     while True:
         try:
             s = _read_settings_bot()   # re-read each poll so dashboard changes apply immediately
@@ -515,20 +699,25 @@ def run(symbol: str, dry_run: bool) -> None:
                     pos.peak_roe = roe
                     pos.save()
 
+                def _close(reason: str) -> None:
+                    nonlocal pos, session_pnl
+                    realized = roe / 100 * pos.margin
+                    session_pnl += realized
+                    close_market(pos, reason, dry_run)
+                    pos = None; Position.clear()
+
                 # Hard SL — always close
                 hard_hit = (pos.side == "LONG"  and price <= pos.sl_hard_price) or \
                            (pos.side == "SHORT" and price >= pos.sl_hard_price)
                 if hard_hit:
                     logger.warning("HARD SL  ROE=%.2f%%  price=%.4f", roe, price)
-                    close_market(pos, f"HARD_SL({roe:.1f}%)", dry_run)
-                    pos = None; Position.clear(); last_close_time = time.time()
+                    _close(f"HARD_SL({roe:.1f}%)"); last_close_time = time.time()
 
                 # TP hit
                 elif (pos.side == "LONG"  and price >= pos.tp_price) or \
                      (pos.side == "SHORT" and price <= pos.tp_price):
                     logger.info("TP hit!  ROE=%.2f%%  price=%.4f", roe, price)
-                    close_market(pos, f"TP({roe:.1f}%)", dry_run)
-                    pos = None; Position.clear(); last_close_time = time.time()
+                    _close(f"TP({roe:.1f}%)"); last_close_time = time.time()
 
                 # Trailing stop — once peak hit activation, lock-in gains on pullback
                 elif pos.peak_roe >= TRAIL_ACTIVATE_ROE and \
@@ -538,8 +727,7 @@ def run(symbol: str, dry_run: bool) -> None:
                         "TRAIL_STOP  peak=%.2f%%  roe=%.2f%%  giveback=%.2f%%",
                         pos.peak_roe, roe, giveback,
                     )
-                    close_market(pos, f"TRAIL(peak={pos.peak_roe:.1f}%→{roe:.1f}%)", dry_run)
-                    pos = None; Position.clear(); last_close_time = time.time()
+                    _close(f"TRAIL(peak={pos.peak_roe:.1f}%→{roe:.1f}%)"); last_close_time = time.time()
 
                 # Early TP — trend flipped while in profit, take the money
                 elif roe >= MIN_ROE_FOR_FLIP_EXIT and \
@@ -548,31 +736,45 @@ def run(symbol: str, dry_run: bool) -> None:
                         "TREND_FLIP_TP  dir=%s vs pos=%s  score=%+.2f  ROE=%.2f%%",
                         direction, pos.side, score, roe,
                     )
-                    close_market(pos, f"FLIP_TP({roe:.1f}%)", dry_run)
-                    pos = None; Position.clear(); last_close_time = time.time()
+                    _close(f"FLIP_TP({roe:.1f}%)"); last_close_time = time.time()
 
                 # Soft SL — re-check trend
                 elif (pos.side == "LONG"  and price <= pos.sl_soft_price) or \
                      (pos.side == "SHORT" and price >= pos.sl_soft_price):
                     logger.warning("Soft SL  ROE=%.2f%%  re-checking trend...", roe)
-                    trend_ok = (pos.side == direction)  # signal still agrees?
+                    trend_ok = (pos.side == direction)
                     if trend_ok:
                         logger.info("Trend holds — staying in position  ROE=%.2f%%", roe)
                     else:
                         logger.warning("Trend gone — closing  ROE=%.2f%%", roe)
-                        close_market(pos, f"SOFT_SL+FLIP({roe:.1f}%)", dry_run)
-                        pos = None; Position.clear(); last_close_time = time.time()
+                        _close(f"SOFT_SL+FLIP({roe:.1f}%)"); last_close_time = time.time()
 
                 # Strong opposite signal — early exit (catches losses too)
                 elif direction not in ("SKIP", pos.side) and abs(score) >= SCORE_THRESHOLD * 1.2:
                     logger.warning("Opposite signal (%s score=%.2f) — early exit  ROE=%.2f%%",
                                    direction, score, roe)
-                    close_market(pos, f"EARLY_EXIT({roe:.1f}%)", dry_run)
-                    pos = None; Position.clear(); last_close_time = time.time()
+                    _close(f"EARLY_EXIT({roe:.1f}%)"); last_close_time = time.time()
+
+            # ── Guardrail check ───────────────────────────────────────────
+            now = time.time()
+            trade_log[:] = [t for t in trade_log if now - t < 3600]  # keep last 1h
+            guard_blocked = ""
+            if session_pnl <= -MAX_SESSION_LOSS_USDT:
+                guard_blocked = f"daily_loss ${session_pnl:.2f}"
+                logger.warning("GUARDRAIL [daily_loss] session=$%.2f — no new entries", session_pnl)
+            elif len(trade_log) >= MAX_TRADES_PER_HOUR:
+                guard_blocked = f"freq {len(trade_log)}/hr"
+                logger.warning("GUARDRAIL [freq] %d trades in last hour — cooling down", len(trade_log))
+
+            guards = {
+                "session_pnl":     round(session_pnl, 2),
+                "trades_this_hour": len(trade_log),
+                "blocked_reason":  guard_blocked,
+            }
 
             # ── Enter new position ────────────────────────────────────────
             copilot_result: Optional[dict] = None
-            if pos is None and direction != "SKIP" and cooldown_left == 0:
+            if pos is None and direction != "SKIP" and cooldown_left == 0 and not guard_blocked:
                 lev = int(s["leverage"])
                 balance = binance.get_balance("USDT")
                 margin  = balance * s["capital_pct"]
@@ -630,15 +832,16 @@ def run(symbol: str, dry_run: bool) -> None:
                             tp,  tp_pct,  tp_pct  * lev,
                             sl_hard, slh_pct, slh_pct * lev,
                         )
+                        trade_log.append(time.time())
                         skip_streak = 0
-            elif direction == "SKIP" or cooldown_left > 0:
+            elif direction == "SKIP" or cooldown_left > 0 or guard_blocked:
                 skip_streak += 1
                 if skip_streak % 6 == 1:
                     reason = f"cooldown {cooldown_left:.0f}s" if cooldown_left > 0 else f"score={score:+.2f}"
                     logger.info("Waiting: %s  (streak=%d)", reason, skip_streak)
 
-            _save_live(price, direction, score, details, cooldown_left, copilot_result)
-            print_dashboard(pos, price, score, direction, details, cooldown_left)
+            _save_live(price, direction, score, details, cooldown_left, copilot_result, guards)
+            print_dashboard(pos, price, score, direction, details, cooldown_left, guards)
 
         except KeyboardInterrupt:
             logger.info("Interrupted")
@@ -646,6 +849,11 @@ def run(symbol: str, dry_run: bool) -> None:
                 logger.warning("! Open position exists — check Binance manually: %s @ %.4f qty=%.4f",
                                pos.side, pos.entry_price, pos.qty)
             break
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                ConnectionResetError, OSError) as exc:
+            # network hiccup — log one-liner only, no traceback
+            logger.warning("Network error (will retry in %ds): %s", POLL_INTERVAL, exc.__class__.__name__)
         except Exception as exc:
             logger.error("Unexpected error: %s", exc, exc_info=True)
 
