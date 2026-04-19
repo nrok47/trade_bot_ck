@@ -26,13 +26,14 @@ except ImportError:
     print("ติดตั้ง Flask ก่อน:  pip install flask")
     raise
 
-BASE_DIR      = Path(__file__).parent
-STATE_FILE    = BASE_DIR / "gambler_state.json"
-LIVE_FILE     = BASE_DIR / "gambler_live.json"
-LOG_FILE      = BASE_DIR / "gambler_bot.log"
+BASE_DIR       = Path(__file__).parent
+STATE_FILE     = BASE_DIR / "gambler_state.json"
+LIVE_FILE      = BASE_DIR / "gambler_live.json"
+LOG_FILE       = BASE_DIR / "gambler_bot.log"
 COPILOT_FILE   = BASE_DIR / "gambler_copilot.json"
 SETTINGS_FILE  = BASE_DIR / "gambler_settings.json"
 HISTORY_FILE   = BASE_DIR / "gambler_history.json"
+BACKTEST_FILE  = BASE_DIR / "gambler_backtest.json"
 
 app = Flask(__name__)
 
@@ -121,6 +122,7 @@ _NAV = """
   <a href="/log">Log</a>
   <a href="/api/status">JSON</a>
   <a href="/settings">Settings</a>
+  <a href="/backtest">Backtest</a>
   <span style="flex:1"></span>
   <button id="cpBtn" class="btn-toggle" onclick="toggleCopilot()">...</button>
 </nav>
@@ -549,6 +551,215 @@ updatePreview();
 </body></html>
 """
 
+BACKTEST_TMPL = """<!DOCTYPE html><html>
+<head>""" + _STYLE + """</head>
+<body>""" + _NAV + """
+<div class="container">
+
+{% if not bt %}
+  <div class="card" style="text-align:center;padding:40px">
+    <p style="font-size:18px;color:#8b949e">ยังไม่มีข้อมูล backtest</p>
+    <p style="color:#8b949e;font-size:13px">รันก่อนจาก terminal:</p>
+    <pre style="display:inline-block;text-align:left;padding:12px 20px">python backtest_gambler.py --days 14</pre>
+    <p style="color:#8b949e;font-size:12px;margin-top:8px">
+      options: --symbol DOGEUSDT &nbsp;--days 30 &nbsp;--threshold 4.0 &nbsp;--tp 40 &nbsp;--sl 25
+    </p>
+  </div>
+{% else %}
+
+  <!-- Header -->
+  <div class="card" style="padding:12px 16px">
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:12px">
+      <span style="font-size:16px;font-weight:bold;color:#f0f6fc">
+        {{ bt.meta.symbol }} &nbsp;·&nbsp; {{ bt.meta.days }}d
+      </span>
+      <span class="badge b-gray">threshold={{ bt.meta.threshold }}</span>
+      <span class="badge b-gray">TP={{ bt.meta.tp_roe }}%</span>
+      <span class="badge b-gray">SL={{ bt.meta.sl_roe }}%</span>
+      <span class="badge b-gray">{{ bt.meta.leverage }}x</span>
+      <span style="flex:1"></span>
+      <span style="color:#8b949e;font-size:11px">ran {{ bt.meta.ran_at }}</span>
+    </div>
+  </div>
+
+  <!-- Key metrics -->
+  <div class="grid4">
+    <div class="card stat">
+      <div class="val blue">{{ bt.metrics.total }}</div>
+      <div class="lbl">Total Trades</div>
+    </div>
+    <div class="card stat">
+      <div class="val {{ 'green' if bt.metrics.win_rate >= 50 else 'red' }}">
+        {{ bt.metrics.win_rate }}%
+      </div>
+      <div class="lbl">Win Rate</div>
+    </div>
+    <div class="card stat">
+      <div class="val {{ 'green' if bt.metrics.profit_factor >= 1 else 'red' }}">
+        {{ '%.2f'|format(bt.metrics.profit_factor) }}
+      </div>
+      <div class="lbl">Profit Factor</div>
+    </div>
+    <div class="card stat">
+      <div class="val {{ 'green' if bt.metrics.expectancy >= 0 else 'red' }}">
+        {{ '%+.2f'|format(bt.metrics.expectancy) }}%
+      </div>
+      <div class="lbl">Expectancy</div>
+    </div>
+    <div class="card stat">
+      <div class="val {{ 'green' if bt.metrics.avg_roe >= 0 else 'red' }}">
+        {{ '%+.2f'|format(bt.metrics.avg_roe) }}%
+      </div>
+      <div class="lbl">Avg ROE / Trade</div>
+    </div>
+    <div class="card stat">
+      <div class="val {{ 'green' if bt.metrics.total_roe >= 0 else 'red' }}">
+        {{ '%+.1f'|format(bt.metrics.total_roe) }}%
+      </div>
+      <div class="lbl">Total ROE (compounded)</div>
+    </div>
+    <div class="card stat">
+      <div class="val red">-{{ '%.1f'|format(bt.metrics.max_drawdown) }}%</div>
+      <div class="lbl">Max Drawdown</div>
+    </div>
+    <div class="card stat">
+      <div class="val {{ 'green' if bt.metrics.sharpe >= 1 else ('yellow' if bt.metrics.sharpe >= 0 else 'red') }}">
+        {{ '%.3f'|format(bt.metrics.sharpe) }}
+      </div>
+      <div class="lbl">Sharpe &nbsp;<span style="color:#555">| Sortino {{ '%.3f'|format(bt.metrics.sortino) }}</span></div>
+    </div>
+  </div>
+
+  <!-- Long vs Short breakdown -->
+  <div class="grid2">
+    <div class="card">
+      <h3>LONG — {{ bt.metrics.long_total }} trades</h3>
+      <div class="grid3">
+        <div class="stat">
+          <div class="val green">{{ bt.metrics.long_wins }}</div>
+          <div class="lbl">Wins</div>
+        </div>
+        <div class="stat">
+          <div class="val red">{{ bt.metrics.long_losses }}</div>
+          <div class="lbl">Losses</div>
+        </div>
+        <div class="stat">
+          <div class="val {{ 'green' if bt.metrics.long_win_rate >= 50 else 'red' }}">
+            {{ bt.metrics.long_win_rate }}%
+          </div>
+          <div class="lbl">Win Rate</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>SHORT — {{ bt.metrics.short_total }} trades</h3>
+      <div class="grid3">
+        <div class="stat">
+          <div class="val green">{{ bt.metrics.short_wins }}</div>
+          <div class="lbl">Wins</div>
+        </div>
+        <div class="stat">
+          <div class="val red">{{ bt.metrics.short_losses }}</div>
+          <div class="lbl">Losses</div>
+        </div>
+        <div class="stat">
+          <div class="val {{ 'green' if bt.metrics.short_win_rate >= 50 else 'red' }}">
+            {{ bt.metrics.short_win_rate }}%
+          </div>
+          <div class="lbl">Win Rate</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Equity Curve -->
+  <div class="card">
+    <h3>Equity Curve
+      <span style="font-size:11px;color:#8b949e">
+        &nbsp;start=100 &nbsp;|&nbsp;
+        {% if bt.equity_curve %}
+          final={{ bt.equity_curve[-1]['equity'] }}
+          &nbsp;({{ '%+.1f'|format(bt.equity_curve[-1]['equity'] - 100) }})
+        {% endif %}
+      </span>
+    </h3>
+    <canvas id="eqChart" height="90"></canvas>
+  </div>
+
+  <!-- Trade table -->
+  <div class="card">
+    <h3>Trade Log
+      <span style="font-size:11px;color:#8b949e;font-weight:normal">
+        (last {{ [bt.trades|length, 100]|min }} of {{ bt.trades|length }})
+      </span>
+    </h3>
+    {% if bt.trades %}
+    <table>
+      <tr>
+        <th>#</th><th>Entry</th><th>Exit</th><th>Side</th>
+        <th>Entry $</th><th>Exit $</th><th>ROE</th><th>Reason</th><th>Hold</th>
+      </tr>
+      {% for t in bt.trades[-100:]|reverse %}
+      <tr>
+        <td class="gray">{{ bt.trades|length - loop.index0 }}</td>
+        <td style="font-size:12px">{{ t.entry_ts }}</td>
+        <td style="font-size:12px">{{ t.exit_ts }}</td>
+        <td><span class="badge {{ 'b-green' if t.side == 'LONG' else 'b-red' }}">{{ t.side }}</span></td>
+        <td>{{ '%.5f'|format(t.entry_price) }}</td>
+        <td>{{ '%.5f'|format(t.exit_price) }}</td>
+        <td class="{{ 'green' if t.roe >= 0 else 'red' }}">{{ '%+.1f'|format(t.roe) }}%</td>
+        <td><span class="badge b-gray">{{ t.reason }}</span></td>
+        <td class="gray">{{ t.hold_bars }}b</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="no-pos">No trades</p>
+    {% endif %}
+  </div>
+
+{% endif %}
+</div>
+<script>
+{% if bt and bt.equity_curve %}
+(function(){
+  var raw = {{ bt.equity_curve|tojson }};
+  var labels = raw.map(function(d){return d.ts;});
+  var data   = raw.map(function(d){return d.equity;});
+  new Chart(document.getElementById('eqChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Equity',
+        data: data,
+        borderColor: '#58a6ff',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: {target:'origin', above:'rgba(88,166,255,0.08)', below:'rgba(248,81,73,0.08)'},
+      }]
+    },
+    options: {
+      animation: false,
+      plugins: {
+        legend: {display:false},
+        annotation: {annotations: {
+          breakeven: {type:'line', yMin:100, yMax:100, borderColor:'#ffffff30', borderWidth:1, borderDash:[4,3]}
+        }}
+      },
+      scales: {
+        x: {ticks:{color:'#8b949e',font:{family:'monospace',size:10},maxTicksLimit:12},grid:{color:'#21262d'}},
+        y: {ticks:{color:'#8b949e',font:{family:'monospace',size:10}},grid:{color:'#21262d'}}
+      }
+    }
+  });
+})();
+{% endif %}
+</script>
+</body></html>
+"""
+
 # ── Data helpers ──────────────────────────────────────────────────────────────
 
 def _read_copilot_enabled() -> bool:
@@ -745,6 +956,29 @@ def copilot_toggle():
 @app.route("/api/history")
 def api_history():
     return jsonify(_read_json(HISTORY_FILE) or [])
+
+
+@app.route("/backtest")
+def backtest_page():
+    raw = _read_json(BACKTEST_FILE)
+
+    bt = None
+    if raw:
+        class _BT:
+            pass
+        bt = _BT()
+        bt.meta         = type("M", (), raw.get("meta", {}))()
+        bt.metrics      = type("X", (), raw.get("metrics", {}))()
+        bt.trades       = [type("T", (), t)() for t in raw.get("trades", [])]
+        # Keep equity_curve as raw list of dicts for tojson serialization
+        bt.equity_curve = raw.get("equity_curve", [])
+
+    return render_template_string(BACKTEST_TMPL, bt=bt)
+
+
+@app.route("/api/backtest")
+def api_backtest():
+    return jsonify(_read_json(BACKTEST_FILE) or {})
 
 
 @app.route("/api/status")
