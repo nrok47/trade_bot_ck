@@ -180,7 +180,7 @@ def _metrics(trades: list[dict], equity_curve: list[float]) -> dict:
         return {k: 0 for k in (
             "total wins losses long_total short_total long_wins short_wins "
             "long_losses short_losses win_rate long_win_rate short_win_rate "
-            "total_roe avg_roe profit_factor expectancy "
+            "total_roe avg_roe avg_win_roe avg_loss_roe profit_factor expectancy "
             "max_drawdown max_dd_duration sharpe sortino"
         ).split()}
 
@@ -246,6 +246,8 @@ def _metrics(trades: list[dict], equity_curve: list[float]) -> dict:
         "short_win_rate":  round(len(sw) / len(shorts) * 100, 1) if shorts else 0,
         "total_roe":       round(sum(all_roes), 2),
         "avg_roe":         round(sum(all_roes) / len(trades), 2),
+        "avg_win_roe":     round(avg_win, 2),
+        "avg_loss_roe":    round(avg_loss, 2),
         "profit_factor":   round(pf, 3),
         "expectancy":      round(expectancy, 2),
         "max_drawdown":    round(max_dd, 2),

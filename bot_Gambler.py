@@ -126,6 +126,8 @@ COPILOT_FILE  = "gambler_copilot.json"
 SETTINGS_FILE = "gambler_settings.json"
 HISTORY_FILE  = "gambler_history.json"
 TRADES_FILE   = "gambler_trades.json"
+KELLY_FILE    = "gambler_kelly.json"
+BACKTEST_FILE = "gambler_backtest.json"
 HISTORY_MAX   = 200   # 200 × 30s ≈ 100 นาที
 
 # defaults ที่ dashboard ใช้แสดงเมื่อยังไม่เคย save settings
@@ -157,6 +159,49 @@ def _copilot_enabled() -> bool:
     except Exception:
         pass
     return False  # default OFF; เปิดได้จาก Dashboard (ต้องมี ANTHROPIC_API_KEY)
+
+
+def _kelly_enabled() -> bool:
+    try:
+        if os.path.exists(KELLY_FILE):
+            with open(KELLY_FILE) as f:
+                return bool(json.load(f).get("enabled", False))
+    except Exception:
+        pass
+    return False
+
+
+def _apply_kelly(s: dict) -> dict:
+    """Override capital_pct with ¼ Kelly fraction if Kelly is ON and backtest data exists."""
+    if not _kelly_enabled():
+        return s
+    try:
+        if not os.path.exists(BACKTEST_FILE):
+            logger.debug("Kelly ON แต่ไม่มี backtest data — ใช้ capital_pct เดิม")
+            return s
+        with open(BACKTEST_FILE) as f:
+            m = json.load(f).get("metrics", {})
+        wins     = m.get("wins",         0)
+        total    = m.get("total",        0)
+        avg_win  = m.get("avg_win_roe",  0.0)
+        avg_loss = m.get("avg_loss_roe", 0.0)
+        if total < 10 or avg_win <= 0 or avg_loss <= 0:
+            return s
+        p       = wins / total
+        b       = avg_win / avg_loss
+        kelly_f = (p * b - (1 - p)) / b
+        if kelly_f <= 0:
+            logger.debug("Kelly ติดลบ (f=%.3f) — ใช้ capital_pct เดิม", kelly_f)
+            return s
+        frac = min(kelly_f * 0.25, 0.60)   # ¼ Kelly, cap 60%
+        s = dict(s)
+        s["capital_pct"] = frac
+        logger.info("KELLY: f*=%.1f%%  ¼Kelly=%.1f%%  → capital_pct=%.1f%%",
+                    kelly_f * 100, frac * 100, frac * 100)
+        return s
+    except Exception as exc:
+        logger.warning("Kelly error: %s — ใช้ capital_pct เดิม", exc)
+        return s
 
 
 # ── Position dataclass ────────────────────────────────────────────────────────
@@ -740,6 +785,7 @@ def run(symbol: str, dry_run: bool) -> None:
     while True:
         try:
             s = _read_settings_bot()   # re-read each poll so dashboard changes apply immediately
+            s = _apply_kelly(s)        # override capital_pct if Kelly is ON
             price   = binance.get_price()
             direction, score, details, atr_5m = compute_signal(symbol, threshold=s["score_threshold"])
             cooldown_left = max(0.0, COOLDOWN_SECS - (time.time() - last_close_time))

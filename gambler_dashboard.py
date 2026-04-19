@@ -34,6 +34,7 @@ COPILOT_FILE   = BASE_DIR / "gambler_copilot.json"
 SETTINGS_FILE  = BASE_DIR / "gambler_settings.json"
 HISTORY_FILE   = BASE_DIR / "gambler_history.json"
 BACKTEST_FILE  = BASE_DIR / "gambler_backtest.json"
+KELLY_FILE     = BASE_DIR / "gambler_kelly.json"
 
 app = Flask(__name__)
 
@@ -478,6 +479,22 @@ SETTINGS_TMPL = """<!DOCTYPE html><html>
     </div>
   </div>
 
+  <!-- Kelly Criterion -->
+  <div class="card">
+    <h3>Kelly Criterion
+      <span id="kelly_src" style="font-size:11px;color:#8b949e;font-weight:normal;margin-left:8px"></span>
+    </h3>
+    <div id="kelly_body" style="min-height:36px">
+      <p class="no-pos" style="margin:4px 0">กำลังโหลด...</p>
+    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+      <button id="kellyBtn" class="btn-toggle btn-off" onclick="toggleKelly()">Kelly: OFF</button>
+      <span style="font-size:11px;color:#8b949e">
+        เปิดให้บอทปรับ capital% อัตโนมัติตาม ¼ Kelly (ต้องมีข้อมูล backtest ≥ 10 trades)
+      </span>
+    </div>
+  </div>
+
   <div class="card">
     <h3>Trade Preview <span style="font-size:11px;color:#8b949e;font-weight:normal">(ประมาณการณ์)</span></h3>
     <div class="balance-row">
@@ -547,6 +564,44 @@ function saveSettings() {
   });
 }
 updatePreview();
+
+function _setKellyBtn(en) {
+  var b = document.getElementById('kellyBtn');
+  if (!b) return;
+  b.textContent = en ? 'Kelly: ON' : 'Kelly: OFF';
+  b.className = 'btn-toggle ' + (en ? 'btn-on' : 'btn-off');
+}
+function toggleKelly() {
+  fetch('/api/kelly/toggle', {method:'POST'}).then(r=>r.json()).then(d => _setKellyBtn(d.enabled));
+}
+function loadKelly() {
+  fetch('/api/kelly').then(r=>r.json()).then(function(k) {
+    var srcEl = document.getElementById('kelly_src');
+    if (srcEl) srcEl.textContent = k.source ? '· '+k.source : '';
+    _setKellyBtn(k.enabled);
+    var el = document.getElementById('kelly_body');
+    if (!k.available) {
+      el.innerHTML = '<p class="no-pos" style="margin:4px 0">'+(k.reason||'ไม่มีข้อมูล')+'</p>';
+      return;
+    }
+    var kc = k.kelly_f > 0 ? 'green' : 'red';
+    el.innerHTML =
+      '<div class="grid4" style="margin:0 0 10px">' +
+      '<div class="stat"><div class="val '+kc+'">'+k.win_rate+'%</div><div class="lbl">Win Rate</div></div>' +
+      '<div class="stat"><div class="val green">+'+k.avg_win_roe+'%</div><div class="lbl">Avg Win ROE</div></div>' +
+      '<div class="stat"><div class="val red">-'+k.avg_loss_roe+'%</div><div class="lbl">Avg Loss ROE</div></div>' +
+      '<div class="stat"><div class="val gray">'+k.payoff_ratio+'x</div><div class="lbl">Payoff Ratio</div></div>' +
+      '</div>' +
+      '<div style="background:#0d1117;border-radius:6px;padding:8px;font-size:12px">' +
+      'Full Kelly: <b class="'+kc+'">'+k.kelly_f+'%</b>' +
+      ' &nbsp;→&nbsp; ¼ Kelly: <b class="blue">'+k.fractional+'%</b>' +
+      ' &nbsp;→&nbsp; capital_pct: <b class="blue">'+k.fractional+'%</b>' +
+      (k.kelly_f <= 0 ? ' &nbsp;<span class="red">⚠ Kelly ติดลบ — strategy ขาดทุนสะสม</span>' :
+       k.fractional >= 50 ? ' &nbsp;<span class="yellow">⚠ สูงมาก — cap ที่ 60%</span>' : '') +
+      '</div>';
+  });
+}
+loadKelly();
 </script>
 </body></html>
 """
@@ -773,6 +828,69 @@ def _write_copilot_enabled(state: bool) -> None:
     COPILOT_FILE.write_text(json.dumps({"enabled": state}), encoding="utf-8")
 
 
+def _read_kelly_enabled() -> bool:
+    data = _read_json(KELLY_FILE)
+    return bool(data.get("enabled", False)) if data else False
+
+
+def _write_kelly_enabled(state: bool) -> None:
+    KELLY_FILE.write_text(json.dumps({"enabled": state}), encoding="utf-8")
+
+
+def _compute_kelly() -> dict:
+    """Compute Kelly stats from backtest (preferred) or live log (fallback)."""
+    base: dict = {"available": False, "enabled": _read_kelly_enabled()}
+
+    # Try backtest first (most reliable)
+    bt = _read_json(BACKTEST_FILE)
+    if bt and isinstance(bt, dict) and bt.get("metrics", {}).get("total", 0) >= 10:
+        m        = bt["metrics"]
+        avg_win  = m.get("avg_win_roe",  0.0)
+        avg_loss = m.get("avg_loss_roe", 0.0)
+        wins     = m.get("wins",  0)
+        total    = m.get("total", 0)
+        source   = f"backtest · {total} trades"
+    else:
+        # Fallback: live log
+        sm = _parse_summary()
+        if sm["total"] < 10:
+            base["reason"] = f"ข้อมูลน้อยเกินไป ({sm['total']} trades) — รัน backtest ก่อน"
+            return base
+        _W = ("TP(", "TRAIL(", "FLIP_TP(")
+        win_roes  = [t["roe"] for t in sm["trades"] if any(t["reason"].startswith(p) for p in _W)]
+        loss_roes = [abs(t["roe"]) for t in sm["trades"]
+                     if not any(t["reason"].startswith(p) for p in _W)]
+        if not win_roes or not loss_roes:
+            base["reason"] = "ต้องมีทั้ง win และ loss อย่างน้อย 1 ครั้ง"
+            return base
+        avg_win  = sum(win_roes)  / len(win_roes)
+        avg_loss = sum(loss_roes) / len(loss_roes)
+        wins     = len(win_roes)
+        total    = sm["total"]
+        source   = f"live log · {total} trades"
+
+    if avg_win <= 0 or avg_loss <= 0:
+        base["reason"] = "avg_win หรือ avg_loss เป็น 0"
+        return base
+
+    p       = wins / total
+    b       = avg_win / avg_loss
+    kelly_f = (p * b - (1 - p)) / b
+    frac    = max(0.0, min(kelly_f * 0.25, 0.60))  # ¼ Kelly, cap 60%
+
+    return {
+        "available":    True,
+        "enabled":      _read_kelly_enabled(),
+        "kelly_f":      round(kelly_f * 100, 1),   # full Kelly %
+        "fractional":   round(frac * 100, 1),       # ¼ Kelly %
+        "win_rate":     round(p * 100, 1),
+        "avg_win_roe":  round(avg_win, 2),
+        "avg_loss_roe": round(avg_loss, 2),
+        "payoff_ratio": round(b, 3),
+        "source":       source,
+    }
+
+
 _SETTINGS_DEFAULTS: dict = {
     "capital_pct":     0.30,
     "leverage":        8,
@@ -950,6 +1068,18 @@ def copilot_state():
 def copilot_toggle():
     new_state = not _read_copilot_enabled()
     _write_copilot_enabled(new_state)
+    return jsonify({"enabled": new_state})
+
+
+@app.route("/api/kelly")
+def api_kelly():
+    return jsonify(_compute_kelly())
+
+
+@app.route("/api/kelly/toggle", methods=["POST"])
+def kelly_toggle():
+    new_state = not _read_kelly_enabled()
+    _write_kelly_enabled(new_state)
     return jsonify({"enabled": new_state})
 
 
