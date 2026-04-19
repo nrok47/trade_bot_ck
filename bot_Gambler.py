@@ -125,6 +125,7 @@ LIVE_FILE     = "gambler_live.json"
 COPILOT_FILE  = "gambler_copilot.json"
 SETTINGS_FILE = "gambler_settings.json"
 HISTORY_FILE  = "gambler_history.json"
+TRADES_FILE   = "gambler_trades.json"
 HISTORY_MAX   = 200   # 200 × 30s ≈ 100 นาที
 
 # defaults ที่ dashboard ใช้แสดงเมื่อยังไม่เคย save settings
@@ -171,6 +172,11 @@ class Position:
     sl_hard_price: float
     entry_time: float    # unix timestamp
     peak_roe: float = 0.0   # highest ROE reached during this position's lifetime
+    # context at entry — used for trade log analytics
+    score_at_entry:  float = 0.0
+    regime_at_entry: str   = ""
+    adx_at_entry:    float = 0.0
+    hurst_at_entry:  float = 0.0
 
     def roe(self, price: float) -> float:
         """Unrealised ROE % (excludes fees)."""
@@ -189,7 +195,11 @@ class Position:
             with open(STATE_FILE) as f:
                 d = json.load(f)
             # tolerate older state files missing newer fields
-            d.setdefault("peak_roe", 0.0)
+            d.setdefault("peak_roe",        0.0)
+            d.setdefault("score_at_entry",  0.0)
+            d.setdefault("regime_at_entry", "")
+            d.setdefault("adx_at_entry",    0.0)
+            d.setdefault("hurst_at_entry",  0.0)
             p = cls(**d)
             logger.info("Restored position: %s @ %.4f  qty=%.4f  peak_roe=%.2f%%",
                         p.side, p.entry_price, p.qty, p.peak_roe)
@@ -228,6 +238,39 @@ def get_fear_and_greed() -> int:
     except Exception as exc:
         logger.debug("F&G fetch failed: %s — using cached %d", exc, _fng_cache[1])
         return _fng_cache[1] or 50
+
+
+# ── Trade log ────────────────────────────────────────────────────────────────
+
+def _log_trade(pos: "Position", exit_price: float, roe: float, reason: str) -> None:
+    """Append one closed-trade record to gambler_trades.json."""
+    try:
+        duration_min = round((time.time() - pos.entry_time) / 60, 1)
+        record = {
+            "exit_time":    time.strftime("%Y-%m-%d %H:%M:%S"),
+            "entry_time":   time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(pos.entry_time)),
+            "duration_min": duration_min,
+            "side":         pos.side,
+            "entry_price":  pos.entry_price,
+            "exit_price":   round(exit_price, 6),
+            "roe":          round(roe, 2),
+            "pnl_usdt":     round(roe / 100 * pos.margin, 2),
+            "reason":       reason,
+            "score_at_entry":  round(pos.score_at_entry, 3),
+            "regime_at_entry": pos.regime_at_entry,
+            "adx_at_entry":    round(pos.adx_at_entry, 1),
+            "hurst_at_entry":  round(pos.hurst_at_entry, 3),
+            "peak_roe":        round(pos.peak_roe, 2),
+        }
+        trades: list = []
+        if os.path.exists(TRADES_FILE):
+            with open(TRADES_FILE) as f:
+                trades = json.load(f)
+        trades.append(record)
+        with open(TRADES_FILE, "w") as f:
+            json.dump(trades, f, indent=2)
+    except Exception as exc:
+        logger.debug("_log_trade error: %s", exc)
 
 
 # ── Hurst Exponent ────────────────────────────────────────────────────────────
@@ -573,7 +616,8 @@ def _bar(score: float, width: int = 20) -> str:
 
 def _save_live(price: float, direction: str, score: float, details: dict,
                cooldown_left: float, copilot: Optional[dict] = None,
-               guards: Optional[dict] = None) -> None:
+               guards: Optional[dict] = None,
+               pos: Optional["Position"] = None) -> None:
     """Write lightweight state snapshot for the web dashboard."""
     try:
         data: dict = {
@@ -592,14 +636,22 @@ def _save_live(price: float, direction: str, score: float, details: dict,
         with open(LIVE_FILE, "w") as f:
             json.dump(data, f)
 
-        # append per-TF scores to rolling history for chart
+        # append per-poll snapshot to rolling history for chart + analysis
+        reg = details.get("regime", {})
         entry = {
-            "ts":    time.strftime("%H:%M:%S"),
-            "3m":    round(details.get("3m",  {}).get("score", 0), 3),
-            "5m":    round(details.get("5m",  {}).get("score", 0), 3),
-            "15m":   round(details.get("15m", {}).get("score", 0), 3),
-            "fng":   round(details.get("fng", {}).get("score", 0), 2),
-            "total": round(score, 3),
+            "ts":     time.strftime("%Y-%m-%d %H:%M:%S"),  # full datetime
+            "price":  round(price, 6),
+            "dir":    direction,
+            "3m":     round(details.get("3m",  {}).get("score", 0), 3),
+            "5m":     round(details.get("5m",  {}).get("score", 0), 3),
+            "15m":    round(details.get("15m", {}).get("score", 0), 3),
+            "fng":    round(details.get("fng", {}).get("score", 0), 2),
+            "total":  round(score, 3),
+            "regime": reg.get("label", ""),
+            "adx":    reg.get("adx", 0.0),
+            "hurst":  reg.get("hurst", 0.5),
+            "pos_side": pos.side          if pos else "",
+            "pos_roe":  round(pos.roe(price), 2) if pos else None,
         }
         try:
             history: list = []
@@ -703,6 +755,7 @@ def run(symbol: str, dry_run: bool) -> None:
                     nonlocal pos, session_pnl
                     realized = roe / 100 * pos.margin
                     session_pnl += realized
+                    _log_trade(pos, price, roe, reason)
                     close_market(pos, reason, dry_run)
                     pos = None; Position.clear()
 
@@ -812,6 +865,7 @@ def run(symbol: str, dry_run: bool) -> None:
                             sl_hard_roe=s["sl_hard_roe_pct"],
                             leverage=lev,
                         )
+                        _reg = details.get("regime", {})
                         pos = Position(
                             side=direction,
                             entry_price=fill_price,
@@ -821,6 +875,10 @@ def run(symbol: str, dry_run: bool) -> None:
                             sl_soft_price=sl_soft,
                             sl_hard_price=sl_hard,
                             entry_time=time.time(),
+                            score_at_entry=score,
+                            regime_at_entry=_reg.get("label", ""),
+                            adx_at_entry=_reg.get("adx", 0.0),
+                            hurst_at_entry=_reg.get("hurst", 0.5),
                         )
                         pos.save()
                         tp_pct  = abs(tp - fill_price) / fill_price * 100
@@ -840,7 +898,7 @@ def run(symbol: str, dry_run: bool) -> None:
                     reason = f"cooldown {cooldown_left:.0f}s" if cooldown_left > 0 else f"score={score:+.2f}"
                     logger.info("Waiting: %s  (streak=%d)", reason, skip_streak)
 
-            _save_live(price, direction, score, details, cooldown_left, copilot_result, guards)
+            _save_live(price, direction, score, details, cooldown_left, copilot_result, guards, pos)
             print_dashboard(pos, price, score, direction, details, cooldown_left, guards)
 
         except KeyboardInterrupt:
