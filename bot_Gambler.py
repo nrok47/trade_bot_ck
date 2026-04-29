@@ -577,9 +577,8 @@ def calc_levels(entry: float, side: str, atr_val: float = 0.0,
 
     if atr_val > 0:
         atr_tp_move  = atr_val / entry * ATR_TP_MULT
-        atr_sl_move  = atr_val / entry * ATR_SL_MULT
         tp_move      = max(tp_roe_move, atr_tp_move)
-        sl_hard_move = min(sl_hard_roe_move, atr_sl_move)
+        sl_hard_move = sl_hard_roe_move   # fixed ROE cap — ATR too small for low-vol coins
     else:
         tp_move      = tp_roe_move
         sl_hard_move = sl_hard_roe_move
