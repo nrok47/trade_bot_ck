@@ -48,7 +48,7 @@ from binance_client import binance
 from config import config
 from indicators import (
     CandleData, ema, rsi as calc_rsi, atr as calc_atr, bollinger_bands,
-    adx as calc_adx,
+    adx as calc_adx, vwap as calc_vwap,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ CAPITAL_PCT      = 0.30    # สัดส่วน balance ต่อไม้  0
 TAKER_FEE        = 0.0004  # futures taker fee ต่อขา (0.04%)
 TP_ROE_PCT       = 30.0    # เป้ากำไร ROE% ต่อไม้
 SL_SOFT_ROE_PCT  = 10.0    # Soft SL: re-check trend แล้วค่อยตัดสิน
-SL_HARD_ROE_PCT  = 30.0    # Hard SL: ปิดทันทีไม่มีข้อแม้
+SL_HARD_ROE_PCT  = 15.0    # Hard SL: ปิดทันทีไม่มีข้อแม้ (RR 2:1 vs TP 30%)
 
 # ── Strategy Tuning ───────────────────────────────────────────────────────────
 SCORE_THRESHOLD  = 2.5     # คะแนนขั้นต่ำก่อนเปิดไม้ (max ~15)  ลดจาก 3.5 → 2.5 เพื่อเข้าบ่อยขึ้น ~30%
@@ -111,6 +111,11 @@ HURST_TRENDING = 0.55   # H > นี้ = trending
 TRAIL_ACTIVATE_ROE    = 10.0  # เปิด trailing หลัง ROE peak ≥ ค่านี้
 TRAIL_GIVEBACK_PCT    = 0.40  # ปิดเมื่อ ROE ถอยลง 40% จาก peak
 MIN_ROE_FOR_FLIP_EXIT = 5.0   # ต้องมีกำไร ≥ ค่านี้ ถึง early-exit เมื่อ trend กลับ
+
+# ── ATR-based exits (Pine Script style) ──────────────────────────────────────
+ATR_TP_MULT     = 2.5    # TP = 2.5 × ATR
+ATR_SL_MULT     = 1.5    # SL_hard = 1.5 × ATR (capped by SL_HARD_ROE_PCT)
+ATR_PERIOD_EXIT = 14
 
 # ── Timeframe Weights (12h lookback) ─────────────────────────────────────────
 TF_CONFIG: dict[str, dict] = {
@@ -447,6 +452,19 @@ def _score_tf(candles: CandleData, weight: float) -> tuple[float, dict]:
         pos_pct = (price - bb.lower) / (bb.upper - bb.lower) * 100 if bb.upper != bb.lower else 50
         info["bb"] = f"inside {pos_pct:.0f}% bw={bb.bandwidth:.4f}"
 
+    # 3b. VWAP bias — price vs rolling 100-bar VWAP
+    vwap_val = calc_vwap(highs, lows, closes, volumes, period=min(100, len(closes)))
+    if vwap_val > 0:
+        gap_vwap = (price - vwap_val) / vwap_val * 100
+        if gap_vwap > 0.05:
+            score += 0.3 * weight
+            info["vwap"] = f"ABOVE +{gap_vwap:.3f}%"
+        elif gap_vwap < -0.05:
+            score -= 0.3 * weight
+            info["vwap"] = f"BELOW {gap_vwap:.3f}%"
+        else:
+            info["vwap"] = f"at {vwap_val:.4f}"
+
     # 4. Volume Surge — amplify score if current bar's volume > 2× avg of prev 20
     vol_ratio = 1.0
     if len(volumes) >= 22:
@@ -545,18 +563,26 @@ def calc_levels(entry: float, side: str, atr_val: float = 0.0,
     """
     Compute TP, SL_soft, SL_hard as absolute prices.
 
-    TP price move = TP_ROE% / leverage + round-trip fee%
-      e.g. 30%/8 + 0.08% = 3.83%
-    ATR override: if 1.5×ATR > computed TP move, use ATR (avoid stop hunts).
+    ATR-adaptive (Pine Script style):
+      TP move      = max(ROE-based,     ATR_TP_MULT × ATR / entry)  — farther target wins
+      SL_hard move = min(ROE-based cap, ATR_SL_MULT × ATR / entry)  — tighter stop wins
+      SL_soft move = ROE-based 10% (trend re-check trigger, unchanged)
+
+    Falls back to pure ROE-based when atr_val == 0.
     """
-    fee_pct      = TAKER_FEE * 2          # two legs
-    tp_move      = tp_roe      / 100 / leverage + fee_pct
-    sl_soft_move = SL_SOFT_ROE_PCT / 100 / leverage
-    sl_hard_move = sl_hard_roe / 100 / leverage
+    fee_pct          = TAKER_FEE * 2
+    tp_roe_move      = tp_roe      / 100 / leverage + fee_pct
+    sl_soft_move     = SL_SOFT_ROE_PCT / 100 / leverage
+    sl_hard_roe_move = sl_hard_roe / 100 / leverage
 
     if atr_val > 0:
-        atr_move = atr_val / entry * 1.5
-        tp_move = max(tp_move, atr_move)   # at least 1.5× ATR for TP
+        atr_tp_move  = atr_val / entry * ATR_TP_MULT
+        atr_sl_move  = atr_val / entry * ATR_SL_MULT
+        tp_move      = max(tp_roe_move, atr_tp_move)
+        sl_hard_move = min(sl_hard_roe_move, atr_sl_move)
+    else:
+        tp_move      = tp_roe_move
+        sl_hard_move = sl_hard_roe_move
 
     if side == "LONG":
         return (
@@ -564,12 +590,11 @@ def calc_levels(entry: float, side: str, atr_val: float = 0.0,
             entry * (1 - sl_soft_move),
             entry * (1 - sl_hard_move),
         )
-    else:
-        return (
-            entry * (1 - tp_move),
-            entry * (1 + sl_soft_move),
-            entry * (1 + sl_hard_move),
-        )
+    return (
+        entry * (1 - tp_move),
+        entry * (1 + sl_soft_move),
+        entry * (1 + sl_hard_move),
+    )
 
 
 # ── Order helpers ─────────────────────────────────────────────────────────────

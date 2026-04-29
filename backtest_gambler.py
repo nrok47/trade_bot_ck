@@ -27,17 +27,20 @@ from typing import Optional
 
 from binance.client import Client
 
-from indicators import CandleData, ema as _ema, rsi as _rsi, bollinger_bands
+from indicators import (
+    CandleData, ema as _ema, rsi as _rsi, bollinger_bands,
+    atr as _atr_ind, adx as _adx_ind, vwap as _vwap_ind,
+)
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # ── Strategy defaults (same as bot_Gambler.py) ────────────────────────────────
 LEVERAGE           = 8
-SCORE_THRESHOLD    = 3.5
+SCORE_THRESHOLD    = 2.5     # matches bot_Gambler.py
 TP_ROE_PCT         = 30.0
 SL_SOFT_ROE_PCT    = 10.0
-SL_HARD_ROE_PCT    = 30.0
+SL_HARD_ROE_PCT    = 15.0    # RR 2:1 (TP 30% : SL 15%)
 TAKER_FEE          = 0.0004
 EMA_GAP_PCT        = 0.03
 RSI_OVERSOLD       = 40
@@ -47,6 +50,19 @@ TRAIL_ACTIVATE_ROE = 10.0
 TRAIL_GIVEBACK_PCT = 0.40
 MIN_ROE_FOR_FLIP   = 5.0
 COOLDOWN_BARS      = 1      # 1 × 5m bar ≈ 5-min cooldown
+CDC_FAST           = 12
+CDC_SLOW           = 26
+
+# ── ATR-based exits ───────────────────────────────────────────────────────────
+ATR_TP_MULT        = 2.5
+ATR_SL_MULT        = 1.5
+ATR_PERIOD_EXIT    = 14
+
+# ── Regime Detection ──────────────────────────────────────────────────────────
+ADX_TRENDING   = 25
+ADX_WEAK       = 20
+ADX_RANGING    = 15
+HURST_RANGING  = 0.45
 
 TF_WEIGHTS = {"3m": 1.0, "5m": 1.5, "15m": 2.0}
 TF_LIMITS  = {"3m": 240, "5m": 144, "15m":  48}
@@ -130,11 +146,31 @@ def _score_tf(candles: CandleData, weight: float) -> float:
     elif p > bb.upper:
         score -= 0.7 * weight
 
+    # VWAP bias — price vs rolling 100-bar VWAP
+    if len(closes) >= 20:
+        vw = _vwap_ind(highs, lows, closes, volumes, period=min(100, len(closes)))
+        if vw > 0:
+            gap = (closes[-1] - vw) / vw * 100
+            if gap > 0.05:
+                score += 0.3 * weight
+            elif gap < -0.05:
+                score -= 0.3 * weight
+
     # Volume surge
     if len(volumes) >= 22:
         avg_v = sum(volumes[-21:-1]) / 20
         if avg_v > 0 and volumes[-1] / avg_v >= VOL_SURGE_MULT:
             score *= 1.3
+
+    # CDC Action Zone (EMA12 vs EMA26 — mirrors bot signal "1b")
+    if len(closes) >= CDC_SLOW:
+        cs_vals = _ema(closes, CDC_FAST)
+        cl_vals = _ema(closes, CDC_SLOW)
+        if cs_vals and cl_vals:
+            if cs_vals[-1] > cl_vals[-1]:
+                score += 0.5 * weight
+            else:
+                score -= 0.5 * weight
 
     return score
 
@@ -152,10 +188,22 @@ def _signal(sl3: CandleData, sl5: CandleData, sl15: CandleData,
 # ── TP / SL levels ────────────────────────────────────────────────────────────
 
 def _levels(entry: float, side: str, tp_roe: float,
-            sl_hard_roe: float, lev: int) -> tuple[float, float, float]:
-    tp_move      = tp_roe     / 100 / lev + TAKER_FEE * 2
-    sl_soft_move = SL_SOFT_ROE_PCT / 100 / lev
-    sl_hard_move = sl_hard_roe / 100 / lev
+            sl_hard_roe: float, lev: int,
+            atr_val: float = 0.0) -> tuple[float, float, float]:
+    fee_pct          = TAKER_FEE * 2
+    tp_roe_move      = tp_roe      / 100 / lev + fee_pct
+    sl_soft_move     = SL_SOFT_ROE_PCT / 100 / lev
+    sl_hard_roe_move = sl_hard_roe / 100 / lev
+
+    if atr_val > 0:
+        atr_tp_move  = atr_val / entry * ATR_TP_MULT
+        atr_sl_move  = atr_val / entry * ATR_SL_MULT
+        tp_move      = max(tp_roe_move, atr_tp_move)
+        sl_hard_move = min(sl_hard_roe_move, atr_sl_move)
+    else:
+        tp_move      = tp_roe_move
+        sl_hard_move = sl_hard_roe_move
+
     if side == "LONG":
         return (entry * (1 + tp_move),
                 entry * (1 - sl_soft_move),
@@ -284,6 +332,48 @@ def _close_pos(trades: list, equity_curve: list, equity_ts: list,
     return roe
 
 
+def hurst_exponent(prices: list[float], min_lag: int = 2, max_lag: int = 20) -> float:
+    """Estimate Hurst exponent via variance of log-returns (copied from bot_Gambler.py)."""
+    if len(prices) < max_lag + 2:
+        return 0.5
+    try:
+        log_rets = [math.log(prices[i] / prices[i-1])
+                    for i in range(1, len(prices)) if prices[i-1] > 0]
+        lags = list(range(min_lag, min(max_lag, len(log_rets) // 2)))
+        if len(lags) < 3:
+            return 0.5
+        log_lags, log_stds = [], []
+        for lag in lags:
+            diffs = [log_rets[i + lag] - log_rets[i] for i in range(len(log_rets) - lag)]
+            var = sum(d * d for d in diffs) / len(diffs)
+            if var > 0:
+                log_lags.append(math.log(lag))
+                log_stds.append(math.log(var) / 2)
+        n = len(log_lags)
+        if n < 2:
+            return 0.5
+        mx = sum(log_lags) / n
+        my = sum(log_stds)  / n
+        num = sum((log_lags[i] - mx) * (log_stds[i] - my) for i in range(n))
+        den = sum((log_lags[i] - mx) ** 2 for i in range(n))
+        return round(num / den, 4) if den != 0 else 0.5
+    except Exception:
+        return 0.5
+
+
+def detect_regime(adx_val: float, hurst_val: float) -> tuple[str, float]:
+    """ADX + Hurst → (regime_label, threshold_multiplier) (copied from bot_Gambler.py)."""
+    strong_ranging = adx_val < ADX_RANGING and hurst_val < HURST_RANGING
+    any_ranging    = adx_val < ADX_WEAK    or  hurst_val < HURST_RANGING
+    if strong_ranging:
+        return "RANGING_STRONG", 1.6
+    elif any_ranging:
+        return "RANGING", 1.4
+    elif adx_val < ADX_TRENDING:
+        return "WEAK_TREND", 1.2
+    return "TRENDING", 1.0
+
+
 def run_backtest(symbol: str, days: int, threshold: float,
                  tp_roe: float, sl_roe: float, lev: int) -> dict:
     print(f"Fetching {symbol} — {days} days × 3 TFs …")
@@ -336,7 +426,20 @@ def run_backtest(symbol: str, days: int, threshold: float,
         sl5  = _slice(c5,  i   - TF_LIMITS["5m"]  + 1, i)
         sl15 = _slice(c15, j15 - TF_LIMITS["15m"] + 1, j15)
 
-        direction, score = _signal(sl3, sl5, sl15, threshold)
+        # Regime detection from 15m slice (mirrors bot_Gambler.py compute_signal)
+        adx_val   = 20.0
+        hurst_val = 0.5
+        if sl15 and len(sl15.closes) >= 30:
+            try:
+                adx_res   = _adx_ind(sl15.highs, sl15.lows, sl15.closes, 14)
+                adx_val   = adx_res.adx
+                hurst_val = hurst_exponent(list(sl15.closes))
+            except Exception:
+                pass
+        _, regime_mult = detect_regime(adx_val, hurst_val)
+        eff_threshold  = threshold * regime_mult
+
+        direction, score = _signal(sl3, sl5, sl15, eff_threshold)
 
         closed_this_bar = False
 
@@ -409,7 +512,8 @@ def run_backtest(symbol: str, days: int, threshold: float,
                 (i - last_close_bar) >= COOLDOWN_BARS and
                 i + 1 < n):
             ep = c5.opens[i + 1]  # fill at next bar open (avoids look-ahead)
-            tp, sl_s, sl_h = _levels(ep, direction, tp_roe, sl_roe, lev)
+            atr5 = _atr_ind(sl5.highs, sl5.lows, sl5.closes, ATR_PERIOD_EXIT)
+            tp, sl_s, sl_h = _levels(ep, direction, tp_roe, sl_roe, lev, atr5)
             pos_side  = direction
             pos_entry = ep
             pos_tp    = tp
@@ -442,14 +546,19 @@ def run_backtest(symbol: str, days: int, threshold: float,
 
     return {
         "meta": {
-            "symbol":    symbol,
-            "days":      days,
-            "threshold": threshold,
-            "tp_roe":    tp_roe,
-            "sl_roe":    sl_roe,
-            "leverage":  lev,
-            "bars_5m":   n,
-            "ran_at":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol":           symbol,
+            "days":             days,
+            "threshold":        threshold,
+            "tp_roe":           tp_roe,
+            "sl_roe":           sl_roe,
+            "leverage":         lev,
+            "bars_5m":          n,
+            "ran_at":           datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "cdc_action_zone":  True,
+            "regime_detection": True,
+            "atr_adaptive_sl":  True,
+            "vwap_bias":        True,
+            "fng_note":         "Fear&Greed not included (no historical API)",
         },
         "metrics":      m,
         "trades":       trades,

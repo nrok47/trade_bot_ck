@@ -313,7 +313,7 @@ DASH_TMPL = """<!DOCTYPE html><html>
         &nbsp;<span style="color:#79c0ff">&#9632;</span> 3m (w&times;1.0)
         &nbsp;<span style="color:#3fb950">&#9632;</span> 5m (w&times;1.5)
         &nbsp;<span style="color:#e3b341">&#9632;</span> 15m (w&times;2.0)
-        &nbsp;<span style="color:#555">&#8212; &plusmn;3.5 threshold</span>
+        &nbsp;<span style="color:#555">&#8212; &plusmn;2.5 threshold</span>
       </span>
     </h3>
     <canvas id="histChart" height="90"></canvas>
@@ -396,8 +396,8 @@ async function loadChart() {
       plugins: {
         legend: {labels:{color:'#8b949e',font:{family:'monospace',size:11},boxWidth:12}},
         annotation: {annotations: {
-          hi:   {type:'line',yMin: 3.5,yMax: 3.5,borderColor:'#ffffff33',borderWidth:1,borderDash:[4,3]},
-          lo:   {type:'line',yMin:-3.5,yMax:-3.5,borderColor:'#ffffff33',borderWidth:1,borderDash:[4,3]},
+          hi:   {type:'line',yMin: 2.5,yMax: 2.5,borderColor:'#ffffff33',borderWidth:1,borderDash:[4,3]},
+          lo:   {type:'line',yMin:-2.5,yMax:-2.5,borderColor:'#ffffff33',borderWidth:1,borderDash:[4,3]},
           zero: {type:'line',yMin:0,   yMax:0,   borderColor:'#ffffff18',borderWidth:1},
         }}
       },

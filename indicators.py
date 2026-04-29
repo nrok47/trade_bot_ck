@@ -235,6 +235,33 @@ def atr(
     return atr_val
 
 
+# ── VWAP (Volume-Weighted Average Price) ─────────────────────────────────────
+
+def vwap(
+    highs:   Sequence[float],
+    lows:    Sequence[float],
+    closes:  Sequence[float],
+    volumes: Sequence[float],
+    period:  int = 100,
+) -> float:
+    """
+    Rolling VWAP over the last `period` bars.
+    For 24/7 crypto markets (no session anchor), uses rolling window.
+    Typical price = (H + L + C) / 3
+    Returns 0.0 if insufficient data.
+    """
+    n = min(period, len(closes), len(volumes))
+    if n < 1:
+        return 0.0
+    h = highs[-n:]
+    l = lows[-n:]
+    c = closes[-n:]
+    v = volumes[-n:]
+    pv_sum = sum((hi + lo + cl) / 3.0 * vol for hi, lo, cl, vol in zip(h, l, c, v))
+    v_sum  = sum(v)
+    return pv_sum / v_sum if v_sum > 0 else 0.0
+
+
 # ── Bollinger Bands ───────────────────────────────────────────────────────────
 
 from dataclasses import dataclass as _dc
