@@ -71,7 +71,7 @@ logger = logging.getLogger("gambler")
 
 # ── Money Management ──────────────────────────────────────────────────────────
 LEVERAGE         = 8       # leverage (1–20); เปลี่ยนต้องรีสตาร์ทบอท
-CAPITAL_PCT      = 0.30    # สัดส่วน balance ต่อไม้  0.30 = 30%
+CAPITAL_PCT      = 0.15    # สัดส่วน balance ต่อไม้  0.15 = 15%  (ลดจาก 30% เพื่อควบ drawdown)
 TAKER_FEE        = 0.0004  # futures taker fee ต่อขา (0.04%)
 TP_ROE_PCT       = 30.0    # เป้ากำไร ROE% ต่อไม้
 SL_SOFT_ROE_PCT  = 10.0    # Soft SL: re-check trend แล้วค่อยตัดสิน
