@@ -356,6 +356,38 @@ class BinanceClient:
             logger.error("get_klines error: %s", exc)
             return None
 
+    def place_stop_market(self, side: str, qty: float, stop_price: float, dry_run: bool) -> Optional[str]:
+        """
+        Place STOP_MARKET reduceOnly futures order (hard SL that survives bot offline).
+        side: "SELL" for LONG position, "BUY" for SHORT position.
+        Returns orderId string or None on failure.
+        """
+        rounded_price = self._round_price(stop_price)
+        rounded_qty   = self._round_qty(qty)
+        if dry_run:
+            fake_id = f"DRY_SL_{side}_{rounded_price}"
+            logger.info("[DRY] STOP_MARKET %s  qty=%.4f  stop=%.4f  id=%s",
+                        side, rounded_qty, rounded_price, fake_id)
+            return fake_id
+        try:
+            order_side = Client.SIDE_SELL if side == "SELL" else Client.SIDE_BUY
+            resp = self._client.futures_create_order(
+                symbol=config.SYMBOL,
+                side=order_side,
+                type="STOP_MARKET",
+                stopPrice=rounded_price,
+                quantity=rounded_qty,
+                reduceOnly=True,
+                workingType="MARK_PRICE",
+            )
+            order_id = str(resp["orderId"])
+            logger.info("STOP_MARKET %s placed  qty=%.4f  stop=%.4f  id=%s",
+                        side, rounded_qty, rounded_price, order_id)
+            return order_id
+        except BinanceAPIException as exc:
+            logger.error("place_stop_market error: %s", exc)
+            return None
+
     def cancel_all_open_orders(self) -> None:
         if config.DRY_RUN:
             logger.info("[DRY RUN] Would cancel all open orders")
