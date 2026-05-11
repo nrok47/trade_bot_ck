@@ -417,7 +417,7 @@ def adx(
     def _wilder(vals: list[float], n: int) -> list[float]:
         if len(vals) < n:
             return []
-        result = [sum(vals[:n])]
+        result = [sum(vals[:n]) / n]
         for v in vals[n:]:
             result.append(result[-1] - result[-1] / n + v)
         return result
@@ -435,7 +435,12 @@ def adx(
         denom = pdi + mdi
         dx_vals.append(100 * abs(pdi - mdi) / denom if denom > 0 else 0.0)
 
-    adx_vals = _wilder(dx_vals, period)
+    # ADX = EMA of DX (Wilder's formula: divide new value by n so it converges to DX, not 14×DX)
+    adx_vals: list[float] = []
+    if len(dx_vals) >= period:
+        adx_vals = [sum(dx_vals[:period]) / period]
+        for v in dx_vals[period:]:
+            adx_vals.append((adx_vals[-1] * (period - 1) + v) / period)
     if not adx_vals or not s_tr:
         return ADXResult(20.0, 25.0, 25.0)
 

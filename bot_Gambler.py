@@ -227,6 +227,8 @@ class Position:
     regime_at_entry: str   = ""
     adx_at_entry:    float = 0.0
     hurst_at_entry:  float = 0.0
+    # exchange-side hard SL order (survives bot offline)
+    sl_order_id: str = ""
 
     def roe(self, price: float) -> float:
         """Unrealised ROE % (excludes fees)."""
@@ -250,6 +252,7 @@ class Position:
             d.setdefault("regime_at_entry", "")
             d.setdefault("adx_at_entry",    0.0)
             d.setdefault("hurst_at_entry",  0.0)
+            d.setdefault("sl_order_id",     "")
             p = cls(**d)
             logger.info("Restored position: %s @ %.4f  qty=%.4f  peak_roe=%.2f%%",
                         p.side, p.entry_price, p.qty, p.peak_roe)
@@ -352,7 +355,8 @@ def hurst_exponent(prices: list[float], min_lag: int = 2, max_lag: int = 20) -> 
         my = sum(log_stds)  / n
         num = sum((log_lags[i] - mx) * (log_stds[i] - my) for i in range(n))
         den = sum((log_lags[i] - mx) ** 2 for i in range(n))
-        return round(num / den, 4) if den != 0 else 0.5
+        H = num / den if den != 0 else 0.5
+        return round(max(0.0, min(1.0, H)), 4)
     except Exception:
         return 0.5
 
@@ -741,7 +745,8 @@ def _save_live(price: float, direction: str, score: float, details: dict,
 
 def print_dashboard(pos: Optional[Position], price: float, score: float,
                     direction: str, details: dict, cooldown_left: float,
-                    guards: Optional[dict] = None) -> None:
+                    guards: Optional[dict] = None,
+                    cap_pct: float = CAPITAL_PCT) -> None:
     ts = time.strftime("%H:%M:%S")
     arrow = {"LONG": "▲", "SHORT": "▼", "SKIP": "◆"}.get(direction, "?")
     bar = _bar(score)
@@ -751,7 +756,7 @@ def print_dashboard(pos: Optional[Position], price: float, score: float,
                  f"  H={reg.get('hurst',0.5):.3f}  mult×{reg.get('mult',1.0):.1f}]") if reg else ""
 
     print(f"\n{'='*62}")
-    print(f"  {ts}  {config.SYMBOL}  ${price:.4f}  [GAMBLER 8x  cap={CAPITAL_PCT*100:.0f}%]{hurst_tag}")
+    print(f"  {ts}  {config.SYMBOL}  ${price:.4f}  [GAMBLER 8x  cap={cap_pct*100:.0f}%]{hurst_tag}")
     print(f"  Score [{bar}] {score:+.2f}  →  {arrow} {direction}")
     if cooldown_left > 0:
         print(f"  Cooldown: {cooldown_left:.0f}s remaining")
@@ -791,15 +796,31 @@ def print_dashboard(pos: Optional[Position], price: float, score: float,
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def run(symbol: str, dry_run: bool) -> None:
-    logger.info("=== Gambler Bot  symbol=%s  8x  capital=%.0f%%  dry=%s ===",
-                symbol, CAPITAL_PCT * 100, dry_run)
+    _s0 = _read_settings_bot()
+    logger.info("=== Gambler Bot  symbol=%s  %dx  capital=%.0f%%  dry=%s ===",
+                symbol, int(_s0["leverage"]), _s0["capital_pct"] * 100, dry_run)
     logger.info("TP=%.0f%% ROE  SL_soft=%.0f%%  SL_hard=%.0f%%  fee=%.2f%%/leg  threshold=%.1f",
-                TP_ROE_PCT, SL_SOFT_ROE_PCT, SL_HARD_ROE_PCT, TAKER_FEE * 100, SCORE_THRESHOLD)
+                _s0["tp_roe_pct"], SL_SOFT_ROE_PCT, _s0["sl_hard_roe_pct"],
+                TAKER_FEE * 100, _s0["score_threshold"])
 
     setup_leverage(dry_run)
     pos: Optional[Position] = Position.load()
     last_close_time: float = 0.0
     skip_streak = 0
+
+    # Check if SL stop order was filled while bot was offline
+    if pos and pos.sl_order_id and not dry_run:
+        status = binance.get_order_status(pos.sl_order_id)
+        if status == "FILLED":
+            logger.warning(
+                "SL stop order FILLED while offline — position closed at %.4f  order=%s",
+                pos.sl_hard_price, pos.sl_order_id,
+            )
+            _log_trade(pos, pos.sl_hard_price, -SL_HARD_ROE_PCT, "HARD_SL_OFFLINE")
+            pos = None
+            Position.clear()
+        elif status is None:
+            logger.warning("SL order %s not found on exchange — may have been manually cancelled", pos.sl_order_id)
 
     # Guardrail state (resets on restart)
     session_pnl: float = 0.0         # cumulative closed P&L this session (USDT)
@@ -827,6 +848,9 @@ def run(symbol: str, dry_run: bool) -> None:
                     realized = roe / 100 * pos.margin
                     session_pnl += realized
                     _log_trade(pos, price, roe, reason)
+                    # Cancel the exchange-side SL stop order before closing with market order
+                    if pos.sl_order_id and not dry_run:
+                        binance.cancel_order(pos.sl_order_id)
                     close_market(pos, reason, dry_run)
                     pos = None; Position.clear()
 
@@ -873,8 +897,9 @@ def run(symbol: str, dry_run: bool) -> None:
                         logger.warning("Trend gone — closing  ROE=%.2f%%", roe)
                         _close(f"SOFT_SL+FLIP({roe:.1f}%)"); last_close_time = time.time()
 
-                # Strong opposite signal — early exit (catches losses too)
-                elif direction not in ("SKIP", pos.side) and abs(score) >= SCORE_THRESHOLD * 1.2:
+                # Strong opposite signal — early exit only when not losing; SL handles losses
+                elif (direction not in ("SKIP", pos.side) and
+                      abs(score) >= SCORE_THRESHOLD * 1.2 and roe >= 0):
                     logger.warning("Opposite signal (%s score=%.2f) — early exit  ROE=%.2f%%",
                                    direction, score, roe)
                     _close(f"EARLY_EXIT({roe:.1f}%)"); last_close_time = time.time()
@@ -938,6 +963,12 @@ def run(symbol: str, dry_run: bool) -> None:
                             leverage=lev,
                         )
                         _reg = details.get("regime", {})
+                        # Place exchange-side hard SL (survives bot offline)
+                        stop_side = "SELL" if direction == "LONG" else "BUY"
+                        sl_order_id = binance.place_stop_market(
+                            stop_side, filled_qty, sl_hard, dry_run
+                        ) or ""
+
                         pos = Position(
                             side=direction,
                             entry_price=fill_price,
@@ -951,6 +982,7 @@ def run(symbol: str, dry_run: bool) -> None:
                             regime_at_entry=_reg.get("label", ""),
                             adx_at_entry=_reg.get("adx", 0.0),
                             hurst_at_entry=_reg.get("hurst", 0.5),
+                            sl_order_id=sl_order_id,
                         )
                         pos.save()
                         tp_pct  = abs(tp - fill_price) / fill_price * 100
@@ -971,7 +1003,7 @@ def run(symbol: str, dry_run: bool) -> None:
                     logger.info("Waiting: %s  (streak=%d)", reason, skip_streak)
 
             _save_live(price, direction, score, details, cooldown_left, copilot_result, guards, pos)
-            print_dashboard(pos, price, score, direction, details, cooldown_left, guards)
+            print_dashboard(pos, price, score, direction, details, cooldown_left, guards, s["capital_pct"])
 
         except KeyboardInterrupt:
             logger.info("Interrupted")

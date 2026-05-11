@@ -498,9 +498,10 @@ def run_backtest(symbol: str, days: int, threshold: float,
                                t5, pos_entry, c5_price, "SOFT_SL", hold, ts_cur, lev)
                     pos_side = None;  last_close_bar = i;  closed_this_bar = True
 
-                # Early exit (strong opposite signal)
+                # Early exit (strong opposite signal) — only when not losing; SL handles losses
                 elif (direction not in ("SKIP", pos_side) and
-                      abs(score) >= threshold * 1.2):
+                      abs(score) >= threshold * 1.2 and
+                      cur_roe >= 0):
                     _close_pos(trades, equity_curve, equity_ts, pos_side, pos_bar,
                                t5, pos_entry, c5_price, "EARLY_EXIT", hold, ts_cur, lev)
                     pos_side = None;  last_close_bar = i;  closed_this_bar = True
