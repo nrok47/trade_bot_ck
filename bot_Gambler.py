@@ -97,7 +97,7 @@ POLL_INTERVAL    = 30      # วินาที ระหว่างแต่�
 COOLDOWN_SECS    = 300     # วินาที รอหลังปิดไม้ก่อนจะเปิดใหม่
 
 # ── Guardrails (ล็อคความเสี่ยง — ข้ามไม่ได้) ─────────────────────────────────
-MAX_SESSION_LOSS_USDT = 100.0 # หยุดเทรดถ้าขาดทุนสะสม session เกิน $100 (~1 hard-SL)
+MAX_SESSION_LOSS_PCT  = 0.05  # หยุดเทรดถ้าขาดทุนสะสม session เกิน 5% ของ balance
 MAX_TRADES_PER_HOUR   = 3     # สูงสุด 3 ไม้ต่อชั่วโมง ป้องกัน churn
 
 # ── Regime Detection (ADX + Hurst) ───────────────────────────────────────────
@@ -826,6 +826,10 @@ def run(symbol: str, dry_run: bool) -> None:
     session_pnl: float = 0.0         # cumulative closed P&L this session (USDT)
     trade_log:   list[float] = []    # timestamps of all entries (for hourly freq check)
     _last_guard: str = ""            # last guard reason — suppresses repeated log spam
+    _start_balance = binance.get_balance("USDT")
+    max_session_loss = _start_balance * MAX_SESSION_LOSS_PCT
+    logger.info("Session loss limit: $%.2f (%.0f%% of $%.2f balance)",
+                max_session_loss, MAX_SESSION_LOSS_PCT * 100, _start_balance)
 
     while True:
         try:
@@ -908,8 +912,8 @@ def run(symbol: str, dry_run: bool) -> None:
             now = time.time()
             trade_log[:] = [t for t in trade_log if now - t < 3600]  # keep last 1h
             guard_blocked = ""
-            if session_pnl <= -MAX_SESSION_LOSS_USDT:
-                guard_blocked = f"daily_loss ${session_pnl:.2f}"
+            if session_pnl <= -max_session_loss:
+                guard_blocked = f"daily_loss ${session_pnl:.2f} (limit=${max_session_loss:.0f})"
             elif len(trade_log) >= MAX_TRADES_PER_HOUR:
                 guard_blocked = f"freq {len(trade_log)}/hr"
             if guard_blocked and guard_blocked != _last_guard:
