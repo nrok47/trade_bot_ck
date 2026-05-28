@@ -1,0 +1,7 @@
+{
+  "capital_pct": 0.3,
+  "leverage": 8,
+  "tp_roe_pct": 30,
+  "sl_hard_roe_pct": 30,
+  "score_threshold": 3
+}

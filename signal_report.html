@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal Advisor</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;
+  --green:#22c55e;--red:#ef4444;--gray:#6b7280;
+  --btc:#f97316;--doge:#eab308;--bnb:#f59e0b;--xrp:#3b82f6;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;padding:20px;max-width:1200px;margin:0 auto;}
+/* Header */
+.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+h1{font-size:1.3rem;color:#fff;letter-spacing:3px;margin-bottom:4px;}
+.ts{color:var(--muted);font-size:0.75rem;}
+.fng-badge{padding:5px 14px;border-radius:12px;font-size:0.82rem;font-weight:bold;white-space:nowrap;}
+.fng-fear{background:#7f1d1d;color:#fca5a5;}
+.fng-greed{background:#14532d;color:#86efac;}
+.fng-neutral{background:#1e3a5f;color:#93c5fd;}
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;cursor:pointer;transition:all 0.15s;}
+.card:hover{border-color:#58a6ff;}
+.card.active{border-color:#58a6ff;background:#1c2333;}
+.card.long{border-left:3px solid var(--green);}
+.card.short{border-left:3px solid var(--red);}
+.card.skip{border-left:3px solid var(--gray);}
+.card-sym{font-size:0.8rem;color:var(--muted);margin-bottom:4px;}
+.card-price{font-size:1.15rem;color:#fff;font-weight:bold;margin-bottom:6px;}
+.card-dir{font-size:0.88rem;font-weight:bold;margin-bottom:6px;}
+.card-score{font-size:0.75rem;color:var(--muted);margin-bottom:6px;}
+.bar-wrap{background:#21262d;border-radius:4px;height:6px;overflow:hidden;margin-bottom:4px;}
+.bar-fill{height:100%;border-radius:4px;transition:width 0.4s ease;}
+.bar-label{display:flex;justify-content:space-between;font-size:0.68rem;color:var(--muted);}
+.long-txt{color:var(--green);}
+.short-txt{color:var(--red);}
+.skip-txt{color:var(--gray);}
+/* Chart */
+.chart-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:20px;}
+.section-title{font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;}
+.chart-wrap{position:relative;height:260px;}
+/* Detail */
+.detail-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:18px;}
+.detail-top{display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap;}
+select{background:#21262d;border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:6px;font-family:inherit;font-size:0.88rem;cursor:pointer;outline:none;}
+select:focus{border-color:#58a6ff;}
+.detail-sig{font-size:0.9rem;font-weight:bold;}
+.detail-note{font-size:0.78rem;color:var(--muted);margin-left:4px;}
+/* Regime row */
+.regime-row{display:flex;gap:0;background:#0d1117;border-radius:6px;margin-bottom:14px;overflow:hidden;}
+.ritem{flex:1;padding:10px 14px;border-right:1px solid var(--border);}
+.ritem:last-child{border-right:none;}
+.rlabel{font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;}
+.rval{font-size:0.88rem;color:#fff;}
+/* TF Table */
+table{width:100%;border-collapse:collapse;font-size:0.78rem;}
+th{color:var(--muted);text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);font-weight:normal;font-size:0.7rem;text-transform:uppercase;}
+td{padding:8px 10px;border-bottom:1px solid #21262d;vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+.tf-name{color:#58a6ff;font-weight:bold;}
+.pos{color:var(--green);font-weight:bold;}
+.neg{color:var(--red);font-weight:bold;}
+.bull{color:var(--green);}
+.bear{color:var(--red);}
+.neut{color:var(--muted);}
+/* Levels */
+.levels{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;background:#0d1117;border-radius:6px;padding:14px;margin-top:14px;}
+.litem{display:flex;flex-direction:column;}
+.llabel{font-size:0.68rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;}
+.lprice{font-size:0.92rem;font-weight:bold;}
+.lpct{font-size:0.72rem;color:var(--muted);margin-top:1px;}
+.no-signal{color:var(--muted);text-align:center;padding:24px;font-style:italic;}
+@media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr);}.regime-row{flex-wrap:wrap;}.levels{grid-template-columns:repeat(3,1fr);}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>⚡ SIGNAL ADVISOR</h1>
+    <div class="ts" id="ts"></div>
+  </div>
+  <div id="fngBadge" class="fng-badge"></div>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="chart-box">
+  <div class="section-title">Score History — ล่าสุด <span id="histLen"></span> รอบ</div>
+  <div class="chart-wrap"><canvas id="scoreChart"></canvas></div>
+</div>
+
+<div class="detail-box">
+  <div class="detail-top">
+    <select id="symSel" onchange="renderDetail(this.value)">
+      <option>BTCUSDT</option><option>DOGEUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option>
+    </select>
+    <div>
+      <span class="detail-sig" id="detailSig"></span>
+      <span class="detail-note" id="detailNote"></span>
+    </div>
+  </div>
+  <div id="detailContent"></div>
+</div>
+
+<script>
+const LATEST  = {"ts": "2026-05-28 03:24:40", "fng": 22, "fng_label": "Extreme Fear", "fng_score": 2.0, "symbols": {"BTCUSDT": {"price": 73898.4, "score": -0.37, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 44.8, "plus_di": 7.0, "minus_di": 41.0, "hurst": 0.0, "atr_5m": 169.779421, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.0, "ema": "BEAR -0.153%", "cdc": "BEAR", "rsi": "OVERSOLD 37", "bb": "mid 12%", "vwap": "BELOW -0.34%", "vol": "x0.4", "atr": 133.611214}, "5m": {"score": -0.58, "ema": "BEAR -0.148%", "cdc": "BEAR", "rsi": "OVERSOLD 35", "bb": "BELOW_LOWER", "vwap": "BELOW -0.68%", "vol": "SURGE x2.6", "atr": 169.779421}, "15m": {"score": -0.78, "ema": "BEAR -0.219%", "cdc": "BEAR", "rsi": "OVERSOLD 28", "bb": "BELOW_LOWER", "vwap": "BELOW -0.92%", "vol": "SURGE x9.5", "atr": 247.864511}}}, "DOGEUSDT": {"price": 0.09954, "score": -1.28, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 46.1, "plus_di": 7.5, "minus_di": 43.1, "hurst": 0.0196, "atr_5m": 0.000384, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.0, "ema": "BEAR -0.237%", "cdc": "BEAR", "rsi": "OVERSOLD 40", "bb": "mid 16%", "vwap": "BELOW -0.33%", "vol": "x0.2", "atr": 0.0003}, "5m": {"score": -1.5, "ema": "BEAR -0.226%", "cdc": "BEAR", "rsi": "OVERSOLD 38", "bb": "mid 4%", "vwap": "BELOW -0.70%", "vol": "x1.6", "atr": 0.000384}, "15m": {"score": -0.78, "ema": "BEAR -0.280%", "cdc": "BEAR", "rsi": "OVERSOLD 30", "bb": "BELOW_LOWER", "vwap": "BELOW -1.29%", "vol": "SURGE x10.0", "atr": 0.000553}}}, "BNBUSDT": {"price": 642.9, "score": -1.73, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 49.1, "plus_di": 5.9, "minus_di": 42.0, "hurst": 0.0097, "atr_5m": 1.410775, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.0, "ema": "BEAR -0.155%", "cdc": "BEAR", "rsi": "OVERSOLD 38", "bb": "mid 17%", "vwap": "BELOW -0.43%", "vol": "x0.9", "atr": 1.037521}, "5m": {"score": -1.95, "ema": "BEAR -0.183%", "cdc": "BEAR", "rsi": "OVERSOLD 36", "bb": "mid 7%", "vwap": "BELOW -0.69%", "vol": "SURGE x2.6", "atr": 1.410775}, "15m": {"score": -0.78, "ema": "BEAR -0.294%", "cdc": "BEAR", "rsi": "OVERSOLD 26", "bb": "BELOW_LOWER", "vwap": "BELOW -1.08%", "vol": "SURGE x6.6", "atr": 2.014113}}}, "XRPUSDT": {"price": 1.296, "score": -2.08, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 47.2, "plus_di": 5.2, "minus_di": 39.6, "hurst": 0.0136, "atr_5m": 0.004375, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.8, "ema": "BEAR -0.178%", "cdc": "BEAR", "rsi": "neutral 41", "bb": "mid 16%", "vwap": "BELOW -0.46%", "vol": "x0.1", "atr": 0.003483}, "5m": {"score": -1.5, "ema": "BEAR -0.200%", "cdc": "BEAR", "rsi": "OVERSOLD 38", "bb": "mid 6%", "vwap": "BELOW -1.04%", "vol": "x1.8", "atr": 0.004375}, "15m": {"score": -0.78, "ema": "BEAR -0.360%", "cdc": "BEAR", "rsi": "OVERSOLD 26", "bb": "BELOW_LOWER", "vwap": "BELOW -1.33%", "vol": "SURGE x6.0", "atr": 0.006047}}}}};
+const HISTORY = [{"ts": "2026-05-28 03:13:11", "fng": 22, "fng_label": "Extreme Fear", "fng_score": 2.0, "symbols": {"BTCUSDT": {"price": 74158.2, "score": -2.3, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 42.6, "plus_di": 9.3, "minus_di": 26.8, "hurst": 0.0, "atr_5m": 118.099921, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -0.8, "ema": "NEUTRAL -0.024%", "cdc": "BEAR", "rsi": "neutral 42", "bb": "mid 23%", "vwap": "BELOW -0.27%", "vol": "x0.6", "atr": 92.973401}, "5m": {"score": -1.5, "ema": "BEAR -0.049%", "cdc": "BEAR", "rsi": "OVERSOLD 40", "bb": "mid 3%", "vwap": "BELOW -0.52%", "vol": "x1.1", "atr": 118.099921}, "15m": {"score": -2.0, "ema": "BEAR -0.185%", "cdc": "BEAR", "rsi": "OVERSOLD 35", "bb": "mid 9%", "vwap": "BELOW -0.77%", "vol": "x0.6", "atr": 208.175666}}}, "DOGEUSDT": {"price": 0.09988, "score": -0.05, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 43.6, "plus_di": 10.3, "minus_di": 29.2, "hurst": 0.0102, "atr_5m": 0.000253, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.0, "ema": "BEAR -0.113%", "cdc": "BEAR", "rsi": "OVERSOLD 38", "bb": "mid 1%", "vwap": "BELOW -0.46%", "vol": "x0.9", "atr": 0.000191}, "5m": {"score": -0.45, "ema": "BEAR -0.105%", "cdc": "BEAR", "rsi": "OVERSOLD 35", "bb": "BELOW_LOWER", "vwap": "BELOW -0.71%", "vol": "x1.8", "atr": 0.000253}, "15m": {"score": -0.6, "ema": "BEAR -0.240%", "cdc": "BEAR", "rsi": "OVERSOLD 34", "bb": "BELOW_LOWER", "vwap": "BELOW -1.26%", "vol": "x0.9", "atr": 0.000456}}}, "BNBUSDT": {"price": 644.06, "score": 0.65, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 46.3, "plus_di": 7.4, "minus_di": 31.4, "hurst": 0.0, "atr_5m": 1.048114, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -0.3, "ema": "BEAR -0.074%", "cdc": "BEAR", "rsi": "OVERSOLD 35", "bb": "BELOW_LOWER", "vwap": "BELOW -0.49%", "vol": "x1.1", "atr": 0.763586}, "5m": {"score": -0.45, "ema": "BEAR -0.117%", "cdc": "BEAR", "rsi": "OVERSOLD 32", "bb": "BELOW_LOWER", "vwap": "BELOW -0.73%", "vol": "x1.7", "atr": 1.048114}, "15m": {"score": -0.6, "ema": "BEAR -0.268%", "cdc": "BEAR", "rsi": "OVERSOLD 29", "bb": "BELOW_LOWER", "vwap": "BELOW -1.08%", "vol": "x1.1", "atr": 1.789479}}}, "XRPUSDT": {"price": 1.2992, "score": -2.38, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 44.8, "plus_di": 7.5, "minus_di": 27.9, "hurst": 0.0136, "atr_5m": 0.003007, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.8, "ema": "BEAR -0.071%", "cdc": "BEAR", "rsi": "neutral 41", "bb": "mid 2%", "vwap": "BELOW -0.47%", "vol": "x1.0", "atr": 0.002402}, "5m": {"score": -0.58, "ema": "BEAR -0.102%", "cdc": "BEAR", "rsi": "OVERSOLD 35", "bb": "BELOW_LOWER", "vwap": "BELOW -1.02%", "vol": "SURGE x2.1", "atr": 0.003007}, "15m": {"score": -2.0, "ema": "BEAR -0.346%", "cdc": "BEAR", "rsi": "OVERSOLD 29", "bb": "mid 8%", "vwap": "BELOW -1.37%", "vol": "x1.1", "atr": 0.00509}}}}}, {"ts": "2026-05-28 03:18:50", "fng": 22, "fng_label": "Extreme Fear", "fng_score": 2.0, "symbols": {"BTCUSDT": {"price": 73623.5, "score": 0.25, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 44.8, "plus_di": 7.0, "minus_di": 41.0, "hurst": 0.0083, "atr_5m": 164.985341, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -0.39, "ema": "BEAR -0.139%", "cdc": "BEAR", "rsi": "OVERSOLD 22", "bb": "BELOW_LOWER", "vwap": "BELOW -0.80%", "vol": "SURGE x22.3", "atr": 138.422473}, "5m": {"score": -0.58, "ema": "BEAR -0.135%", "cdc": "BEAR", "rsi": "OVERSOLD 22", "bb": "BELOW_LOWER", "vwap": "BELOW -1.10%", "vol": "SURGE x28.2", "atr": 164.985341}, "15m": {"score": -0.78, "ema": "BEAR -0.259%", "cdc": "BEAR", "rsi": "OVERSOLD 24", "bb": "BELOW_LOWER", "vwap": "BELOW -1.32%", "vol": "SURGE x7.0", "atr": 247.864511}}}, "DOGEUSDT": {"price": 0.09869, "score": 0.25, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 46.1, "plus_di": 7.5, "minus_di": 43.1, "hurst": 0.0372, "atr_5m": 0.000367, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -0.39, "ema": "BEAR -0.272%", "cdc": "BEAR", "rsi": "OVERSOLD 22", "bb": "BELOW_LOWER", "vwap": "BELOW -1.25%", "vol": "SURGE x25.9", "atr": 0.000307}, "5m": {"score": -0.58, "ema": "BEAR -0.239%", "cdc": "BEAR", "rsi": "OVERSOLD 20", "bb": "BELOW_LOWER", "vwap": "BELOW -1.61%", "vol": "SURGE x26.9", "atr": 0.000367}, "15m": {"score": -0.78, "ema": "BEAR -0.373%", "cdc": "BEAR", "rsi": "OVERSOLD 23", "bb": "BELOW_LOWER", "vwap": "BELOW -2.17%", "vol": "SURGE x7.0", "atr": 0.000553}}}, "BNBUSDT": {"price": 640.93, "score": 0.25, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 49.1, "plus_di": 5.9, "minus_di": 42.0, "hurst": 0.0144, "atr_5m": 1.324677, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -0.39, "ema": "BEAR -0.153%", "cdc": "BEAR", "rsi": "OVERSOLD 22", "bb": "BELOW_LOWER", "vwap": "BELOW -0.84%", "vol": "SURGE x11.2", "atr": 1.034521}, "5m": {"score": -0.58, "ema": "BEAR -0.178%", "cdc": "BEAR", "rsi": "OVERSOLD 21", "bb": "BELOW_LOWER", "vwap": "BELOW -1.08%", "vol": "SURGE x10.4", "atr": 1.324677}, "15m": {"score": -0.78, "ema": "BEAR -0.327%", "cdc": "BEAR", "rsi": "OVERSOLD 22", "bb": "BELOW_LOWER", "vwap": "BELOW -1.43%", "vol": "SURGE x4.2", "atr": 2.014113}}}, "XRPUSDT": {"price": 1.2869, "score": 0.25, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 47.2, "plus_di": 5.2, "minus_di": 39.6, "hurst": 0.029, "atr_5m": 0.004127, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -0.39, "ema": "BEAR -0.196%", "cdc": "BEAR", "rsi": "OVERSOLD 24", "bb": "BELOW_LOWER", "vwap": "BELOW -1.19%", "vol": "SURGE x19.2", "atr": 0.003508}, "5m": {"score": -0.58, "ema": "BEAR -0.209%", "cdc": "BEAR", "rsi": "OVERSOLD 19", "bb": "BELOW_LOWER", "vwap": "BELOW -1.80%", "vol": "SURGE x14.2", "atr": 0.004127}, "15m": {"score": -0.78, "ema": "BEAR -0.436%", "cdc": "BEAR", "rsi": "OVERSOLD 20", "bb": "BELOW_LOWER", "vwap": "BELOW -2.06%", "vol": "SURGE x4.2", "atr": 0.006047}}}}}, {"ts": "2026-05-28 03:24:40", "fng": 22, "fng_label": "Extreme Fear", "fng_score": 2.0, "symbols": {"BTCUSDT": {"price": 73898.4, "score": -0.37, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 44.8, "plus_di": 7.0, "minus_di": 41.0, "hurst": 0.0, "atr_5m": 169.779421, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.0, "ema": "BEAR -0.153%", "cdc": "BEAR", "rsi": "OVERSOLD 37", "bb": "mid 12%", "vwap": "BELOW -0.34%", "vol": "x0.4", "atr": 133.611214}, "5m": {"score": -0.58, "ema": "BEAR -0.148%", "cdc": "BEAR", "rsi": "OVERSOLD 35", "bb": "BELOW_LOWER", "vwap": "BELOW -0.68%", "vol": "SURGE x2.6", "atr": 169.779421}, "15m": {"score": -0.78, "ema": "BEAR -0.219%", "cdc": "BEAR", "rsi": "OVERSOLD 28", "bb": "BELOW_LOWER", "vwap": "BELOW -0.92%", "vol": "SURGE x9.5", "atr": 247.864511}}}, "DOGEUSDT": {"price": 0.09954, "score": -1.28, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 46.1, "plus_di": 7.5, "minus_di": 43.1, "hurst": 0.0196, "atr_5m": 0.000384, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.0, "ema": "BEAR -0.237%", "cdc": "BEAR", "rsi": "OVERSOLD 40", "bb": "mid 16%", "vwap": "BELOW -0.33%", "vol": "x0.2", "atr": 0.0003}, "5m": {"score": -1.5, "ema": "BEAR -0.226%", "cdc": "BEAR", "rsi": "OVERSOLD 38", "bb": "mid 4%", "vwap": "BELOW -0.70%", "vol": "x1.6", "atr": 0.000384}, "15m": {"score": -0.78, "ema": "BEAR -0.280%", "cdc": "BEAR", "rsi": "OVERSOLD 30", "bb": "BELOW_LOWER", "vwap": "BELOW -1.29%", "vol": "SURGE x10.0", "atr": 0.000553}}}, "BNBUSDT": {"price": 642.9, "score": -1.73, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 49.1, "plus_di": 5.9, "minus_di": 42.0, "hurst": 0.0097, "atr_5m": 1.410775, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.0, "ema": "BEAR -0.155%", "cdc": "BEAR", "rsi": "OVERSOLD 38", "bb": "mid 17%", "vwap": "BELOW -0.43%", "vol": "x0.9", "atr": 1.037521}, "5m": {"score": -1.95, "ema": "BEAR -0.183%", "cdc": "BEAR", "rsi": "OVERSOLD 36", "bb": "mid 7%", "vwap": "BELOW -0.69%", "vol": "SURGE x2.6", "atr": 1.410775}, "15m": {"score": -0.78, "ema": "BEAR -0.294%", "cdc": "BEAR", "rsi": "OVERSOLD 26", "bb": "BELOW_LOWER", "vwap": "BELOW -1.08%", "vol": "SURGE x6.6", "atr": 2.014113}}}, "XRPUSDT": {"price": 1.296, "score": -2.08, "eff_thresh": 4.2, "direction": "SKIP", "regime": "RANGING", "adx": 47.2, "plus_di": 5.2, "minus_di": 39.6, "hurst": 0.0136, "atr_5m": 0.004375, "tp": null, "sl_soft": null, "sl_hard": null, "tf_details": {"3m": {"score": -1.8, "ema": "BEAR -0.178%", "cdc": "BEAR", "rsi": "neutral 41", "bb": "mid 16%", "vwap": "BELOW -0.46%", "vol": "x0.1", "atr": 0.003483}, "5m": {"score": -1.5, "ema": "BEAR -0.200%", "cdc": "BEAR", "rsi": "OVERSOLD 38", "bb": "mid 6%", "vwap": "BELOW -1.04%", "vol": "x1.8", "atr": 0.004375}, "15m": {"score": -0.78, "ema": "BEAR -0.360%", "cdc": "BEAR", "rsi": "OVERSOLD 26", "bb": "BELOW_LOWER", "vwap": "BELOW -1.33%", "vol": "SURGE x6.0", "atr": 0.006047}}}}}];
+const SYMBOLS = ["BTCUSDT","DOGEUSDT","BNBUSDT","XRPUSDT"];
+const SYM_COL = {BTCUSDT:"#f97316",DOGEUSDT:"#eab308",BNBUSDT:"#f59e0b",XRPUSDT:"#3b82f6"};
+
+function fmtP(p){
+  if(!p) return "—";
+  if(p>=1000) return p.toLocaleString("en",{minimumFractionDigits:1,maximumFractionDigits:1});
+  if(p>=1)    return p.toFixed(4);
+  return p.toFixed(6);
+}
+function dirCls(d){return d==="LONG"?"long-txt":d==="SHORT"?"short-txt":"skip-txt";}
+function dirIcon(d){return d==="LONG"?"▲ LONG":d==="SHORT"?"▼ SHORT":"— SKIP";}
+function colorCell(s){
+  if(!s) return '<span class="neut">—</span>';
+  s = s.toString();
+  if(/^(BULL|OVERSOLD|ABOVE|SURGE|BELOW_LOWER)/.test(s)) return `<span class="bull">${s}</span>`;
+  if(/^(BEAR|OVERBOUGHT|BELOW|ABOVE_UPPER)/.test(s))     return `<span class="bear">${s}</span>`;
+  return `<span class="neut">${s}</span>`;
+}
+
+// Header
+document.getElementById("ts").textContent = LATEST.ts + " UTC";
+const fb = document.getElementById("fngBadge");
+fb.textContent = `F&G: ${LATEST.fng} — ${LATEST.fng_label}`;
+fb.className = "fng-badge " + (LATEST.fng<=45?"fng-fear":LATEST.fng>=55?"fng-greed":"fng-neutral");
+
+// Cards
+const cardsEl = document.getElementById("cards");
+SYMBOLS.forEach(sym=>{
+  const d = LATEST.symbols[sym];
+  const el = document.createElement("div");
+  el.className = `card ${d.direction.toLowerCase()}`;
+  el.id = "card-"+sym;
+  el.onclick = ()=>{ document.getElementById("symSel").value=sym; renderDetail(sym); };
+  const pct   = Math.min(Math.abs(d.score) / d.eff_thresh * 100, 100).toFixed(1);
+  const barCol = d.direction==="LONG"?"var(--green)":d.direction==="SHORT"?"var(--red)":"var(--gray)";
+  const remaining = Math.max(d.eff_thresh - Math.abs(d.score), 0).toFixed(2);
+  const nearLabel = pct >= 100 ? "✓ ผ่าน threshold" : `เหลือ ${remaining}`;
+  el.innerHTML = `
+    <div class="card-sym">${sym}</div>
+    <div class="card-price">${fmtP(d.price)}</div>
+    <div class="card-dir ${dirCls(d.direction)}">${dirIcon(d.direction)}</div>
+    <div class="card-score">score ${d.score>0?"+":""}${d.score.toFixed(2)} / ±${d.eff_thresh.toFixed(2)}</div>
+    <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${barCol}"></div></div>
+    <div class="bar-label"><span>${pct}%</span><span>${nearLabel}</span></div>`;
+  cardsEl.appendChild(el);
+});
+
+// Chart
+document.getElementById("histLen").textContent = HISTORY.length;
+const labels = HISTORY.map(h=>h.ts.slice(5,16).replace("T"," "));
+const datasets = SYMBOLS.map(sym=>({
+  label: sym,
+  data: HISTORY.map(h=>h.symbols&&h.symbols[sym]?h.symbols[sym].score:null),
+  borderColor: SYM_COL[sym],
+  borderWidth: 2,
+  pointRadius: HISTORY.length>30?0:3,
+  pointHoverRadius: 5,
+  tension: 0.3,
+  fill: false,
+}));
+// Threshold reference
+const thr = HISTORY.map(h=>{
+  const first = h.symbols&&Object.values(h.symbols)[0];
+  return first?first.eff_thresh:3.0;
+});
+datasets.push({label:"__thr+",data:thr,borderColor:"#ffffff28",borderWidth:1,borderDash:[6,4],pointRadius:0,fill:false});
+datasets.push({label:"__thr-",data:thr.map(v=>-v),borderColor:"#ffffff28",borderWidth:1,borderDash:[6,4],pointRadius:0,fill:false});
+
+new Chart(document.getElementById("scoreChart"),{
+  type:"line",
+  data:{labels,datasets},
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    interaction:{mode:"index",intersect:false},
+    plugins:{
+      legend:{labels:{color:"#8b949e",filter:i=>!i.text.startsWith("__"),boxWidth:10,padding:14}},
+      tooltip:{
+        backgroundColor:"#161b22",borderColor:"#30363d",borderWidth:1,
+        titleColor:"#c9d1d9",bodyColor:"#8b949e",
+        callbacks:{label:ctx=>{
+          if(ctx.dataset.label.startsWith("__")) return null;
+          const v=ctx.parsed.y;
+          return ` ${ctx.dataset.label}: ${v>0?"+":""}${v.toFixed(2)}`;
+        }}
+      }
+    },
+    scales:{
+      x:{ticks:{color:"#8b949e",maxTicksLimit:10,maxRotation:0},grid:{color:"#21262d"}},
+      y:{ticks:{color:"#8b949e"},grid:{color:"#21262d"},suggestedMin:-9,suggestedMax:9}
+    }
+  }
+});
+
+// Detail
+function renderDetail(sym){
+  SYMBOLS.forEach(s=>{
+    const c=document.getElementById("card-"+s);
+    if(c) c.classList.toggle("active",s===sym);
+  });
+  const d = LATEST.symbols[sym];
+  if(!d) return;
+
+  document.getElementById("detailSig").innerHTML =
+    `<span class="${dirCls(d.direction)}">${dirIcon(d.direction)}</span>`;
+  document.getElementById("detailNote").textContent =
+    `score ${d.score>0?"+":""}${d.score.toFixed(2)} / need ±${d.eff_thresh.toFixed(2)}`;
+
+  const rc = d.regime==="TRENDING"?"#22c55e":d.regime.includes("RANGING")?"#ef4444":"#eab308";
+  let html = `
+  <div class="regime-row">
+    <div class="ritem"><div class="rlabel">Price</div><div class="rval">${fmtP(d.price)}</div></div>
+    <div class="ritem"><div class="rlabel">Regime</div><div class="rval" style="color:${rc}">${d.regime}</div></div>
+    <div class="ritem"><div class="rlabel">ADX</div><div class="rval">${d.adx.toFixed(1)}</div></div>
+    <div class="ritem"><div class="rlabel">+DI / −DI</div><div class="rval">${d.plus_di.toFixed(0)} / ${d.minus_di.toFixed(0)}</div></div>
+    <div class="ritem"><div class="rlabel">Hurst</div><div class="rval">${d.hurst.toFixed(3)}</div></div>
+  </div>
+  <table>
+    <thead><tr><th>TF</th><th>Score</th><th>EMA 9/21</th><th>CDC 12/26</th><th>RSI</th><th>Bollinger</th><th>VWAP</th><th>Volume</th><th>ATR</th></tr></thead>
+    <tbody>`;
+
+  ["3m","5m","15m"].forEach(tf=>{
+    const t = d.tf_details[tf];
+    if(!t) return;
+    const sc = t.score;
+    html += `<tr>
+      <td class="tf-name">${tf}</td>
+      <td class="${sc>0?"pos":sc<0?"neg":"neut"}">${sc>0?"+":""}${sc.toFixed(2)}</td>
+      <td>${colorCell(t.ema)}</td>
+      <td>${colorCell(t.cdc)}</td>
+      <td>${colorCell(t.rsi)}</td>
+      <td>${colorCell(t.bb)}</td>
+      <td>${colorCell(t.vwap)}</td>
+      <td>${colorCell(t.vol)}</td>
+      <td class="neut">${t.atr||"—"}</td>
+    </tr>`;
+  });
+  html += "</tbody></table>";
+
+  if(d.direction!=="SKIP" && d.tp){
+    const tpPct = Math.abs((d.tp-d.price)/d.price*100).toFixed(2);
+    const slPct = Math.abs((d.sl_hard-d.price)/d.price*100).toFixed(2);
+    html += `
+    <div class="levels">
+      <div class="litem"><div class="llabel">Entry (ตลาด)</div><div class="lprice" style="color:#fff">${fmtP(d.price)}</div></div>
+      <div class="litem"><div class="llabel">Take Profit</div><div class="lprice" style="color:var(--green)">${fmtP(d.tp)}</div><div class="lpct">+${tpPct}%</div></div>
+      <div class="litem"><div class="llabel">Stop Loss</div><div class="lprice" style="color:var(--red)">${fmtP(d.sl_hard)}</div><div class="lpct">−${slPct}%</div></div>
+    </div>`;
+  } else if(d.direction==="SKIP"){
+    html += `<div class="no-signal">ยังไม่มี signal — รอ score ผ่าน threshold ±${d.eff_thresh.toFixed(2)}</div>`;
+  }
+
+  document.getElementById("detailContent").innerHTML = html;
+}
+
+renderDetail("BTCUSDT");
+
+// ── Log Table ──────────────────────────────────────────────────────────────
+(function(){
+  if(!HISTORY || HISTORY.length === 0) return;
+  const box = document.createElement("div");
+  box.style.cssText = "margin-top:20px;";
+  box.innerHTML = `
+    <div class="chart-box">
+      <div class="section-title" style="cursor:pointer;user-select:none" onclick="toggleLog()">
+        ▶ Run Log — ${HISTORY.length} รอบที่บันทึกไว้  <span style="font-size:0.68rem;color:#58a6ff">(คลิกเพื่อขยาย)</span>
+      </div>
+      <div id="logTable" style="display:none;overflow-x:auto;margin-top:12px;">
+        <table>
+          <thead><tr>
+            <th>เวลา</th><th>F&G</th>
+            <th>BTC score</th><th>dir</th>
+            <th>DOGE score</th><th>dir</th>
+            <th>BNB score</th><th>dir</th>
+            <th>XRP score</th><th>dir</th>
+          </tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+
+  const syms = ["BTCUSDT","DOGEUSDT","BNBUSDT","XRPUSDT"];
+  const tbody = document.getElementById("logBody");
+  [...HISTORY].reverse().forEach(h=>{
+    const tr = document.createElement("tr");
+    let cells = `<td class="neut">${h.ts.slice(5)}</td><td class="neut">${h.fng}</td>`;
+    syms.forEach(s=>{
+      const d = h.symbols&&h.symbols[s];
+      const sc = d?d.score:null;
+      const dir = d?d.direction:"—";
+      const cls = sc===null?"neut":sc>0?"pos":sc<0?"neg":"neut";
+      cells += `<td class="${cls}">${sc!==null?(sc>0?"+":"")+sc.toFixed(2):"—"}</td>`;
+      cells += `<td class="${dir==="LONG"?"bull":dir==="SHORT"?"bear":"neut"}">${
+        dir==="LONG"?"▲":dir==="SHORT"?"▼":"—"}</td>`;
+    });
+    tr.innerHTML = cells;
+    tbody.appendChild(tr);
+  });
+})();
+
+function toggleLog(){
+  const el = document.getElementById("logTable");
+  if(!el) return;
+  const open = el.style.display==="none";
+  el.style.display = open?"block":"none";
+  el.previousElementSibling.textContent =
+    (open?"▼":"▶") + ` Run Log — ${HISTORY.length} รอบที่บันทึกไว้  ` +
+    (open?"(คลิกเพื่อย่อ)":"(คลิกเพื่อขยาย)");
+  el.previousElementSibling.querySelector("span").style.color="#58a6ff";
+}
+</script>
+</body>
+</html>

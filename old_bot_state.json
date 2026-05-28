@@ -1,0 +1,84 @@
+{
+  "saved_at": "2026-04-18T11:46:40",
+  "cycle": 5,
+  "regrid_count": 0,
+  "direction": "SHORT",
+  "grid_range": {
+    "upper": 1.58466,
+    "lower": 1.371135,
+    "strategy_used": "Lookback",
+    "atr_value": 0.0
+  },
+  "stats": {
+    "daily_profit_usdt": 0.0,
+    "realized_profit_usdt": 0.0,
+    "total_usdt_spent": 96.0,
+    "resets": 19,
+    "total_buys_filled": 0,
+    "total_sells_filled": 0,
+    "start_time": 1776478467.0901976,
+    "daily_start_time": 1776478467.090198
+  },
+  "orders": [
+    {
+      "level_index": 5,
+      "price": 1.481015,
+      "side": "SELL",
+      "order_id": "DRY_SELL_1.481000",
+      "qty": 13.5,
+      "status": "NEW",
+      "filled_at": null,
+      "stop_loss_price": null
+    },
+    {
+      "level_index": 6,
+      "price": 1.498279,
+      "side": "SELL",
+      "order_id": "DRY_SELL_1.498300",
+      "qty": 13.3,
+      "status": "NEW",
+      "filled_at": null,
+      "stop_loss_price": null
+    },
+    {
+      "level_index": 7,
+      "price": 1.515543,
+      "side": "SELL",
+      "order_id": "DRY_SELL_1.515500",
+      "qty": 13.1,
+      "status": "NEW",
+      "filled_at": null,
+      "stop_loss_price": null
+    },
+    {
+      "level_index": 8,
+      "price": 1.532807,
+      "side": "SELL",
+      "order_id": "DRY_SELL_1.532800",
+      "qty": 13.0,
+      "status": "NEW",
+      "filled_at": null,
+      "stop_loss_price": null
+    },
+    {
+      "level_index": 9,
+      "price": 1.550071,
+      "side": "SELL",
+      "order_id": "DRY_SELL_1.550100",
+      "qty": 12.9,
+      "status": "NEW",
+      "filled_at": null,
+      "stop_loss_price": null
+    },
+    {
+      "level_index": 10,
+      "price": 1.567335,
+      "side": "SELL",
+      "order_id": "DRY_SELL_1.567300",
+      "qty": 12.7,
+      "status": "NEW",
+      "filled_at": null,
+      "stop_loss_price": null
+    }
+  ]
+}

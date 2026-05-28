@@ -1,0 +1,1155 @@
+{
+  "meta": {
+    "symbol": "XRPUSDT",
+    "days": 30,
+    "threshold": 2.5,
+    "tp_roe": 30.0,
+    "sl_roe": 15.0,
+    "leverage": 8,
+    "bars_5m": 9240,
+    "ran_at": "2026-05-06 16:33:52",
+    "cdc_action_zone": true,
+    "regime_detection": true,
+    "atr_adaptive_sl": true,
+    "vwap_bias": true,
+    "fng_note": "Fear&Greed not included (no historical API)"
+  },
+  "metrics": {
+    "total": 79,
+    "wins": 28,
+    "losses": 51,
+    "long_total": 45,
+    "short_total": 34,
+    "long_wins": 15,
+    "short_wins": 13,
+    "long_losses": 30,
+    "short_losses": 21,
+    "win_rate": 35.4,
+    "long_win_rate": 33.3,
+    "short_win_rate": 38.2,
+    "total_roe": -45.08,
+    "avg_roe": -0.57,
+    "avg_win_roe": 11.06,
+    "avg_loss_roe": 8.26,
+    "profit_factor": 0.736,
+    "expectancy": -1.41,
+    "max_drawdown": 73.99,
+    "max_dd_duration": 59,
+    "sharpe": -0.0507,
+    "sortino": -0.0486
+  },
+  "trades": [
+    {
+      "entry_ts": "2026-04-04 20:10",
+      "exit_ts": "2026-04-05 06:15",
+      "side": "LONG",
+      "entry_price": 1.3157,
+      "exit_price": 1.2957,
+      "roe": -12.16,
+      "reason": "SOFT_SL",
+      "hold_bars": 121
+    },
+    {
+      "entry_ts": "2026-04-05 06:25",
+      "exit_ts": "2026-04-05 13:35",
+      "side": "SHORT",
+      "entry_price": 1.2974,
+      "exit_price": 1.2864,
+      "roe": 6.78,
+      "reason": "TRAIL",
+      "hold_bars": 86
+    },
+    {
+      "entry_ts": "2026-04-05 13:45",
+      "exit_ts": "2026-04-05 18:40",
+      "side": "SHORT",
+      "entry_price": 1.2871,
+      "exit_price": 1.3025,
+      "roe": -9.57,
+      "reason": "SOFT_SL",
+      "hold_bars": 59
+    },
+    {
+      "entry_ts": "2026-04-05 18:50",
+      "exit_ts": "2026-04-06 09:15",
+      "side": "LONG",
+      "entry_price": 1.3022,
+      "exit_price": 1.352074,
+      "roe": 30.64,
+      "reason": "TP",
+      "hold_bars": 173
+    },
+    {
+      "entry_ts": "2026-04-06 09:50",
+      "exit_ts": "2026-04-06 17:15",
+      "side": "LONG",
+      "entry_price": 1.354,
+      "exit_price": 1.3367,
+      "roe": -10.22,
+      "reason": "SOFT_SL",
+      "hold_bars": 89
+    },
+    {
+      "entry_ts": "2026-04-06 17:25",
+      "exit_ts": "2026-04-07 09:05",
+      "side": "SHORT",
+      "entry_price": 1.3407,
+      "exit_price": 1.3228,
+      "roe": 10.68,
+      "reason": "TRAIL",
+      "hold_bars": 188
+    },
+    {
+      "entry_ts": "2026-04-07 09:20",
+      "exit_ts": "2026-04-07 11:20",
+      "side": "LONG",
+      "entry_price": 1.3209,
+      "exit_price": 1.304,
+      "roe": -10.24,
+      "reason": "SOFT_SL",
+      "hold_bars": 24
+    },
+    {
+      "entry_ts": "2026-04-07 11:30",
+      "exit_ts": "2026-04-07 18:35",
+      "side": "SHORT",
+      "entry_price": 1.3053,
+      "exit_price": 1.3047,
+      "roe": 0.37,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 85
+    },
+    {
+      "entry_ts": "2026-04-07 18:45",
+      "exit_ts": "2026-04-07 19:05",
+      "side": "LONG",
+      "entry_price": 1.3029,
+      "exit_price": 1.3029,
+      "roe": 0.0,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 4
+    },
+    {
+      "entry_ts": "2026-04-07 19:15",
+      "exit_ts": "2026-04-07 20:45",
+      "side": "SHORT",
+      "entry_price": 1.3028,
+      "exit_price": 1.317,
+      "roe": -8.72,
+      "reason": "SOFT_SL",
+      "hold_bars": 18
+    },
+    {
+      "entry_ts": "2026-04-07 20:55",
+      "exit_ts": "2026-04-07 22:50",
+      "side": "LONG",
+      "entry_price": 1.3148,
+      "exit_price": 1.365157,
+      "roe": 30.64,
+      "reason": "TP",
+      "hold_bars": 23
+    },
+    {
+      "entry_ts": "2026-04-07 23:35",
+      "exit_ts": "2026-04-08 00:30",
+      "side": "LONG",
+      "entry_price": 1.3893,
+      "exit_price": 1.363251,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 11
+    },
+    {
+      "entry_ts": "2026-04-08 00:40",
+      "exit_ts": "2026-04-08 07:30",
+      "side": "LONG",
+      "entry_price": 1.3662,
+      "exit_price": 1.3773,
+      "roe": 6.5,
+      "reason": "TRAIL",
+      "hold_bars": 82
+    },
+    {
+      "entry_ts": "2026-04-08 08:25",
+      "exit_ts": "2026-04-08 14:30",
+      "side": "LONG",
+      "entry_price": 1.3807,
+      "exit_price": 1.354812,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 73
+    },
+    {
+      "entry_ts": "2026-04-08 15:20",
+      "exit_ts": "2026-04-09 09:20",
+      "side": "SHORT",
+      "entry_price": 1.3539,
+      "exit_price": 1.3344,
+      "roe": 11.52,
+      "reason": "FLIP_TP",
+      "hold_bars": 216
+    },
+    {
+      "entry_ts": "2026-04-09 09:30",
+      "exit_ts": "2026-04-09 16:35",
+      "side": "LONG",
+      "entry_price": 1.3344,
+      "exit_price": 1.3478,
+      "roe": 8.03,
+      "reason": "TRAIL",
+      "hold_bars": 85
+    },
+    {
+      "entry_ts": "2026-04-09 16:45",
+      "exit_ts": "2026-04-10 23:50",
+      "side": "LONG",
+      "entry_price": 1.3495,
+      "exit_price": 1.3552,
+      "roe": 3.38,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 373
+    },
+    {
+      "entry_ts": "2026-04-11 00:00",
+      "exit_ts": "2026-04-11 15:50",
+      "side": "SHORT",
+      "entry_price": 1.3551,
+      "exit_price": 1.3451,
+      "roe": 5.9,
+      "reason": "FLIP_TP",
+      "hold_bars": 190
+    },
+    {
+      "entry_ts": "2026-04-11 16:00",
+      "exit_ts": "2026-04-11 20:30",
+      "side": "LONG",
+      "entry_price": 1.3452,
+      "exit_price": 1.3588,
+      "roe": 8.09,
+      "reason": "TRAIL",
+      "hold_bars": 54
+    },
+    {
+      "entry_ts": "2026-04-11 20:40",
+      "exit_ts": "2026-04-12 01:40",
+      "side": "LONG",
+      "entry_price": 1.3592,
+      "exit_price": 1.333715,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 60
+    },
+    {
+      "entry_ts": "2026-04-12 02:05",
+      "exit_ts": "2026-04-12 22:25",
+      "side": "SHORT",
+      "entry_price": 1.3254,
+      "exit_price": 1.3253,
+      "roe": 0.06,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 244
+    },
+    {
+      "entry_ts": "2026-04-12 22:40",
+      "exit_ts": "2026-04-13 07:25",
+      "side": "SHORT",
+      "entry_price": 1.3283,
+      "exit_price": 1.328,
+      "roe": 0.18,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 105
+    },
+    {
+      "entry_ts": "2026-04-13 07:35",
+      "exit_ts": "2026-04-13 09:00",
+      "side": "LONG",
+      "entry_price": 1.3274,
+      "exit_price": 1.3291,
+      "roe": 1.02,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 17
+    },
+    {
+      "entry_ts": "2026-04-13 09:10",
+      "exit_ts": "2026-04-13 15:00",
+      "side": "SHORT",
+      "entry_price": 1.3266,
+      "exit_price": 1.3395,
+      "roe": -7.78,
+      "reason": "SOFT_SL",
+      "hold_bars": 70
+    },
+    {
+      "entry_ts": "2026-04-13 15:10",
+      "exit_ts": "2026-04-14 00:50",
+      "side": "LONG",
+      "entry_price": 1.339,
+      "exit_price": 1.3612,
+      "roe": 13.26,
+      "reason": "TRAIL",
+      "hold_bars": 116
+    },
+    {
+      "entry_ts": "2026-04-14 02:00",
+      "exit_ts": "2026-04-14 12:30",
+      "side": "LONG",
+      "entry_price": 1.3659,
+      "exit_price": 1.3662,
+      "roe": 0.18,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 126
+    },
+    {
+      "entry_ts": "2026-04-14 12:40",
+      "exit_ts": "2026-04-14 13:50",
+      "side": "SHORT",
+      "entry_price": 1.3654,
+      "exit_price": 1.391001,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 14
+    },
+    {
+      "entry_ts": "2026-04-14 14:20",
+      "exit_ts": "2026-04-14 17:00",
+      "side": "LONG",
+      "entry_price": 1.3853,
+      "exit_price": 1.3683,
+      "roe": -9.82,
+      "reason": "SOFT_SL",
+      "hold_bars": 32
+    },
+    {
+      "entry_ts": "2026-04-14 17:10",
+      "exit_ts": "2026-04-15 11:10",
+      "side": "SHORT",
+      "entry_price": 1.3685,
+      "exit_price": 1.3585,
+      "roe": 5.85,
+      "reason": "TRAIL",
+      "hold_bars": 216
+    },
+    {
+      "entry_ts": "2026-04-15 12:15",
+      "exit_ts": "2026-04-15 15:55",
+      "side": "LONG",
+      "entry_price": 1.3618,
+      "exit_price": 1.3726,
+      "roe": 6.34,
+      "reason": "TRAIL",
+      "hold_bars": 44
+    },
+    {
+      "entry_ts": "2026-04-15 16:05",
+      "exit_ts": "2026-04-15 20:10",
+      "side": "LONG",
+      "entry_price": 1.3748,
+      "exit_price": 1.3914,
+      "roe": 9.66,
+      "reason": "TRAIL",
+      "hold_bars": 49
+    },
+    {
+      "entry_ts": "2026-04-15 20:20",
+      "exit_ts": "2026-04-16 04:45",
+      "side": "LONG",
+      "entry_price": 1.3887,
+      "exit_price": 1.4033,
+      "roe": 8.41,
+      "reason": "TRAIL",
+      "hold_bars": 101
+    },
+    {
+      "entry_ts": "2026-04-16 04:55",
+      "exit_ts": "2026-04-16 11:35",
+      "side": "LONG",
+      "entry_price": 1.4032,
+      "exit_price": 1.4042,
+      "roe": 0.57,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 80
+    },
+    {
+      "entry_ts": "2026-04-16 11:45",
+      "exit_ts": "2026-04-16 13:40",
+      "side": "SHORT",
+      "entry_price": 1.4061,
+      "exit_price": 1.432464,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 23
+    },
+    {
+      "entry_ts": "2026-04-16 13:50",
+      "exit_ts": "2026-04-16 13:50",
+      "side": "LONG",
+      "entry_price": 1.4255,
+      "exit_price": 1.398772,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 0
+    },
+    {
+      "entry_ts": "2026-04-16 14:00",
+      "exit_ts": "2026-04-16 14:45",
+      "side": "LONG",
+      "entry_price": 1.4064,
+      "exit_price": 1.4069,
+      "roe": 0.28,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 9
+    },
+    {
+      "entry_ts": "2026-04-16 14:55",
+      "exit_ts": "2026-04-16 15:35",
+      "side": "SHORT",
+      "entry_price": 1.4083,
+      "exit_price": 1.425,
+      "roe": -9.49,
+      "reason": "SOFT_SL",
+      "hold_bars": 8
+    },
+    {
+      "entry_ts": "2026-04-16 15:45",
+      "exit_ts": "2026-04-16 20:30",
+      "side": "LONG",
+      "entry_price": 1.4267,
+      "exit_price": 1.4485,
+      "roe": 12.22,
+      "reason": "TRAIL",
+      "hold_bars": 57
+    },
+    {
+      "entry_ts": "2026-04-16 20:40",
+      "exit_ts": "2026-04-17 02:30",
+      "side": "LONG",
+      "entry_price": 1.4458,
+      "exit_price": 1.4247,
+      "roe": -11.68,
+      "reason": "SOFT_SL",
+      "hold_bars": 70
+    },
+    {
+      "entry_ts": "2026-04-17 02:40",
+      "exit_ts": "2026-04-17 09:25",
+      "side": "SHORT",
+      "entry_price": 1.4276,
+      "exit_price": 1.454368,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 81
+    },
+    {
+      "entry_ts": "2026-04-17 09:35",
+      "exit_ts": "2026-04-17 14:40",
+      "side": "LONG",
+      "entry_price": 1.4483,
+      "exit_price": 1.50377,
+      "roe": 30.64,
+      "reason": "TP",
+      "hold_bars": 61
+    },
+    {
+      "entry_ts": "2026-04-17 14:50",
+      "exit_ts": "2026-04-17 18:05",
+      "side": "LONG",
+      "entry_price": 1.5022,
+      "exit_price": 1.474034,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 39
+    },
+    {
+      "entry_ts": "2026-04-17 19:30",
+      "exit_ts": "2026-04-18 04:30",
+      "side": "LONG",
+      "entry_price": 1.4853,
+      "exit_price": 1.4645,
+      "roe": -11.2,
+      "reason": "SOFT_SL",
+      "hold_bars": 108
+    },
+    {
+      "entry_ts": "2026-04-18 04:40",
+      "exit_ts": "2026-04-18 22:00",
+      "side": "SHORT",
+      "entry_price": 1.4667,
+      "exit_price": 1.4312,
+      "roe": 19.36,
+      "reason": "FLIP_TP",
+      "hold_bars": 208
+    },
+    {
+      "entry_ts": "2026-04-18 22:10",
+      "exit_ts": "2026-04-19 01:45",
+      "side": "LONG",
+      "entry_price": 1.4303,
+      "exit_price": 1.4309,
+      "roe": 0.34,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 43
+    },
+    {
+      "entry_ts": "2026-04-19 01:55",
+      "exit_ts": "2026-04-19 05:20",
+      "side": "SHORT",
+      "entry_price": 1.4325,
+      "exit_price": 1.4324,
+      "roe": 0.06,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 41
+    },
+    {
+      "entry_ts": "2026-04-19 05:40",
+      "exit_ts": "2026-04-19 06:15",
+      "side": "LONG",
+      "entry_price": 1.4356,
+      "exit_price": 1.4226,
+      "roe": -7.24,
+      "reason": "SOFT_SL",
+      "hold_bars": 7
+    },
+    {
+      "entry_ts": "2026-04-19 06:25",
+      "exit_ts": "2026-04-19 13:50",
+      "side": "SHORT",
+      "entry_price": 1.4243,
+      "exit_price": 1.4368,
+      "roe": -7.02,
+      "reason": "SOFT_SL",
+      "hold_bars": 89
+    },
+    {
+      "entry_ts": "2026-04-19 14:00",
+      "exit_ts": "2026-04-19 16:55",
+      "side": "LONG",
+      "entry_price": 1.4378,
+      "exit_price": 1.4212,
+      "roe": -9.24,
+      "reason": "SOFT_SL",
+      "hold_bars": 35
+    },
+    {
+      "entry_ts": "2026-04-19 17:05",
+      "exit_ts": "2026-04-20 00:20",
+      "side": "SHORT",
+      "entry_price": 1.4181,
+      "exit_price": 1.4044,
+      "roe": 7.73,
+      "reason": "TRAIL",
+      "hold_bars": 87
+    },
+    {
+      "entry_ts": "2026-04-20 00:30",
+      "exit_ts": "2026-04-20 07:20",
+      "side": "SHORT",
+      "entry_price": 1.4046,
+      "exit_price": 1.430936,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 82
+    },
+    {
+      "entry_ts": "2026-04-20 07:35",
+      "exit_ts": "2026-04-20 15:20",
+      "side": "LONG",
+      "entry_price": 1.4212,
+      "exit_price": 1.4274,
+      "roe": 3.49,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 93
+    },
+    {
+      "entry_ts": "2026-04-20 15:35",
+      "exit_ts": "2026-04-21 12:50",
+      "side": "LONG",
+      "entry_price": 1.4299,
+      "exit_price": 1.4306,
+      "roe": 0.39,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 255
+    },
+    {
+      "entry_ts": "2026-04-21 13:00",
+      "exit_ts": "2026-04-21 20:05",
+      "side": "SHORT",
+      "entry_price": 1.4317,
+      "exit_price": 1.4203,
+      "roe": 6.37,
+      "reason": "TRAIL",
+      "hold_bars": 85
+    },
+    {
+      "entry_ts": "2026-04-21 20:15",
+      "exit_ts": "2026-04-22 03:00",
+      "side": "SHORT",
+      "entry_price": 1.4239,
+      "exit_price": 1.4474,
+      "roe": -13.2,
+      "reason": "SOFT_SL",
+      "hold_bars": 81
+    },
+    {
+      "entry_ts": "2026-04-22 03:10",
+      "exit_ts": "2026-04-22 16:35",
+      "side": "LONG",
+      "entry_price": 1.4482,
+      "exit_price": 1.4486,
+      "roe": 0.22,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 161
+    },
+    {
+      "entry_ts": "2026-04-22 16:45",
+      "exit_ts": "2026-04-23 12:45",
+      "side": "SHORT",
+      "entry_price": 1.4473,
+      "exit_price": 1.4165,
+      "roe": 17.02,
+      "reason": "FLIP_TP",
+      "hold_bars": 240
+    },
+    {
+      "entry_ts": "2026-04-23 12:55",
+      "exit_ts": "2026-04-23 17:35",
+      "side": "LONG",
+      "entry_price": 1.4158,
+      "exit_price": 1.4262,
+      "roe": 5.88,
+      "reason": "TRAIL",
+      "hold_bars": 56
+    },
+    {
+      "entry_ts": "2026-04-23 17:45",
+      "exit_ts": "2026-04-24 03:20",
+      "side": "LONG",
+      "entry_price": 1.4234,
+      "exit_price": 1.4299,
+      "roe": 3.65,
+      "reason": "TRAIL",
+      "hold_bars": 115
+    },
+    {
+      "entry_ts": "2026-04-24 03:40",
+      "exit_ts": "2026-04-24 16:00",
+      "side": "SHORT",
+      "entry_price": 1.4293,
+      "exit_price": 1.4456,
+      "roe": -9.12,
+      "reason": "SOFT_SL",
+      "hold_bars": 148
+    },
+    {
+      "entry_ts": "2026-04-24 16:10",
+      "exit_ts": "2026-04-25 16:00",
+      "side": "LONG",
+      "entry_price": 1.4437,
+      "exit_price": 1.4253,
+      "roe": -10.2,
+      "reason": "SOFT_SL",
+      "hold_bars": 286
+    },
+    {
+      "entry_ts": "2026-04-25 16:10",
+      "exit_ts": "2026-04-26 03:35",
+      "side": "SHORT",
+      "entry_price": 1.4257,
+      "exit_price": 1.4176,
+      "roe": 4.55,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 137
+    },
+    {
+      "entry_ts": "2026-04-26 03:50",
+      "exit_ts": "2026-04-27 00:50",
+      "side": "SHORT",
+      "entry_price": 1.4176,
+      "exit_price": 1.4346,
+      "roe": -9.59,
+      "reason": "SOFT_SL",
+      "hold_bars": 252
+    },
+    {
+      "entry_ts": "2026-04-27 01:20",
+      "exit_ts": "2026-04-27 06:00",
+      "side": "LONG",
+      "entry_price": 1.4367,
+      "exit_price": 1.4148,
+      "roe": -12.19,
+      "reason": "SOFT_SL",
+      "hold_bars": 56
+    },
+    {
+      "entry_ts": "2026-04-27 06:10",
+      "exit_ts": "2026-04-27 14:35",
+      "side": "SHORT",
+      "entry_price": 1.4176,
+      "exit_price": 1.4089,
+      "roe": 4.91,
+      "reason": "TRAIL",
+      "hold_bars": 101
+    },
+    {
+      "entry_ts": "2026-04-27 14:45",
+      "exit_ts": "2026-04-27 18:15",
+      "side": "SHORT",
+      "entry_price": 1.4089,
+      "exit_price": 1.3945,
+      "roe": 8.18,
+      "reason": "TRAIL",
+      "hold_bars": 42
+    },
+    {
+      "entry_ts": "2026-04-27 19:35",
+      "exit_ts": "2026-04-28 17:30",
+      "side": "SHORT",
+      "entry_price": 1.389,
+      "exit_price": 1.3772,
+      "roe": 6.8,
+      "reason": "TRAIL",
+      "hold_bars": 263
+    },
+    {
+      "entry_ts": "2026-04-28 18:40",
+      "exit_ts": "2026-04-29 11:05",
+      "side": "LONG",
+      "entry_price": 1.3796,
+      "exit_price": 1.3934,
+      "roe": 8.0,
+      "reason": "TRAIL",
+      "hold_bars": 197
+    },
+    {
+      "entry_ts": "2026-04-29 12:05",
+      "exit_ts": "2026-04-29 13:45",
+      "side": "LONG",
+      "entry_price": 1.3871,
+      "exit_price": 1.3715,
+      "roe": -9.0,
+      "reason": "SOFT_SL",
+      "hold_bars": 20
+    },
+    {
+      "entry_ts": "2026-04-29 13:55",
+      "exit_ts": "2026-04-29 20:00",
+      "side": "SHORT",
+      "entry_price": 1.3741,
+      "exit_price": 1.3581,
+      "roe": 9.32,
+      "reason": "TRAIL",
+      "hold_bars": 73
+    },
+    {
+      "entry_ts": "2026-04-29 20:10",
+      "exit_ts": "2026-04-30 00:45",
+      "side": "SHORT",
+      "entry_price": 1.3566,
+      "exit_price": 1.382036,
+      "roe": -15.0,
+      "reason": "HARD_SL",
+      "hold_bars": 55
+    },
+    {
+      "entry_ts": "2026-04-30 01:05",
+      "exit_ts": "2026-04-30 04:45",
+      "side": "LONG",
+      "entry_price": 1.3815,
+      "exit_price": 1.3613,
+      "roe": -11.7,
+      "reason": "SOFT_SL",
+      "hold_bars": 44
+    },
+    {
+      "entry_ts": "2026-04-30 04:55",
+      "exit_ts": "2026-04-30 09:30",
+      "side": "SHORT",
+      "entry_price": 1.3608,
+      "exit_price": 1.3752,
+      "roe": -8.47,
+      "reason": "SOFT_SL",
+      "hold_bars": 55
+    },
+    {
+      "entry_ts": "2026-04-30 09:40",
+      "exit_ts": "2026-05-01 17:00",
+      "side": "LONG",
+      "entry_price": 1.3758,
+      "exit_price": 1.3885,
+      "roe": 7.38,
+      "reason": "TRAIL",
+      "hold_bars": 376
+    },
+    {
+      "entry_ts": "2026-05-01 18:05",
+      "exit_ts": "2026-05-03 22:00",
+      "side": "LONG",
+      "entry_price": 1.3928,
+      "exit_price": 1.3969,
+      "roe": 2.35,
+      "reason": "EARLY_EXIT",
+      "hold_bars": 623
+    },
+    {
+      "entry_ts": "2026-05-03 22:10",
+      "exit_ts": "2026-05-04 02:50",
+      "side": "SHORT",
+      "entry_price": 1.3952,
+      "exit_price": 1.4126,
+      "roe": -9.98,
+      "reason": "SOFT_SL",
+      "hold_bars": 56
+    },
+    {
+      "entry_ts": "2026-05-04 03:00",
+      "exit_ts": "2026-05-04 10:30",
+      "side": "LONG",
+      "entry_price": 1.4096,
+      "exit_price": 1.3953,
+      "roe": -8.12,
+      "reason": "SOFT_SL",
+      "hold_bars": 90
+    },
+    {
+      "entry_ts": "2026-05-04 10:40",
+      "exit_ts": "2026-05-05 13:15",
+      "side": "SHORT",
+      "entry_price": 1.3955,
+      "exit_price": 1.4165,
+      "roe": -12.04,
+      "reason": "SOFT_SL",
+      "hold_bars": 319
+    },
+    {
+      "entry_ts": "2026-05-05 13:25",
+      "exit_ts": "2026-05-06 09:30",
+      "side": "LONG",
+      "entry_price": 1.4157,
+      "exit_price": 1.4435,
+      "roe": 15.71,
+      "reason": "END_OF_DATA",
+      "hold_bars": 241
+    }
+  ],
+  "equity_curve": [
+    {
+      "ts": "2026-04-04 20:05",
+      "equity": 100.0
+    },
+    {
+      "ts": "2026-04-05 06:15",
+      "equity": 87.8392
+    },
+    {
+      "ts": "2026-04-05 13:35",
+      "equity": 93.7972
+    },
+    {
+      "ts": "2026-04-05 18:40",
+      "equity": 84.819
+    },
+    {
+      "ts": "2026-04-06 09:15",
+      "equity": 110.8075
+    },
+    {
+      "ts": "2026-04-06 17:15",
+      "equity": 99.4812
+    },
+    {
+      "ts": "2026-04-07 09:05",
+      "equity": 110.1068
+    },
+    {
+      "ts": "2026-04-07 11:20",
+      "equity": 98.8369
+    },
+    {
+      "ts": "2026-04-07 18:35",
+      "equity": 99.2004
+    },
+    {
+      "ts": "2026-04-07 19:05",
+      "equity": 99.2004
+    },
+    {
+      "ts": "2026-04-07 20:45",
+      "equity": 90.5504
+    },
+    {
+      "ts": "2026-04-07 22:50",
+      "equity": 118.295
+    },
+    {
+      "ts": "2026-04-08 00:30",
+      "equity": 100.5507
+    },
+    {
+      "ts": "2026-04-08 07:30",
+      "equity": 107.0863
+    },
+    {
+      "ts": "2026-04-08 14:30",
+      "equity": 91.0234
+    },
+    {
+      "ts": "2026-04-09 09:20",
+      "equity": 101.5114
+    },
+    {
+      "ts": "2026-04-09 16:35",
+      "equity": 109.6664
+    },
+    {
+      "ts": "2026-04-10 23:50",
+      "equity": 113.3721
+    },
+    {
+      "ts": "2026-04-11 15:50",
+      "equity": 120.0652
+    },
+    {
+      "ts": "2026-04-11 20:30",
+      "equity": 129.7761
+    },
+    {
+      "ts": "2026-04-12 01:40",
+      "equity": 110.3097
+    },
+    {
+      "ts": "2026-04-12 22:25",
+      "equity": 110.3763
+    },
+    {
+      "ts": "2026-04-13 07:25",
+      "equity": 110.5757
+    },
+    {
+      "ts": "2026-04-13 09:00",
+      "equity": 111.7086
+    },
+    {
+      "ts": "2026-04-13 15:00",
+      "equity": 103.0185
+    },
+    {
+      "ts": "2026-04-14 00:50",
+      "equity": 116.6825
+    },
+    {
+      "ts": "2026-04-14 12:30",
+      "equity": 116.8875
+    },
+    {
+      "ts": "2026-04-14 13:50",
+      "equity": 99.3544
+    },
+    {
+      "ts": "2026-04-14 17:00",
+      "equity": 89.6004
+    },
+    {
+      "ts": "2026-04-15 11:10",
+      "equity": 94.8383
+    },
+    {
+      "ts": "2026-04-15 15:55",
+      "equity": 100.8554
+    },
+    {
+      "ts": "2026-04-15 20:10",
+      "equity": 110.5976
+    },
+    {
+      "ts": "2026-04-16 04:45",
+      "equity": 119.8997
+    },
+    {
+      "ts": "2026-04-16 11:35",
+      "equity": 120.5833
+    },
+    {
+      "ts": "2026-04-16 13:40",
+      "equity": 102.4958
+    },
+    {
+      "ts": "2026-04-16 13:50",
+      "equity": 87.1214
+    },
+    {
+      "ts": "2026-04-16 14:45",
+      "equity": 87.3692
+    },
+    {
+      "ts": "2026-04-16 15:35",
+      "equity": 79.0808
+    },
+    {
+      "ts": "2026-04-16 20:30",
+      "equity": 88.7476
+    },
+    {
+      "ts": "2026-04-17 02:30",
+      "equity": 78.3861
+    },
+    {
+      "ts": "2026-04-17 09:25",
+      "equity": 66.6282
+    },
+    {
+      "ts": "2026-04-17 14:40",
+      "equity": 87.0431
+    },
+    {
+      "ts": "2026-04-17 18:05",
+      "equity": 73.9866
+    },
+    {
+      "ts": "2026-04-18 04:30",
+      "equity": 65.6978
+    },
+    {
+      "ts": "2026-04-18 22:00",
+      "equity": 78.419
+    },
+    {
+      "ts": "2026-04-19 01:45",
+      "equity": 78.6822
+    },
+    {
+      "ts": "2026-04-19 05:20",
+      "equity": 78.7261
+    },
+    {
+      "ts": "2026-04-19 06:15",
+      "equity": 73.0229
+    },
+    {
+      "ts": "2026-04-19 13:50",
+      "equity": 67.896
+    },
+    {
+      "ts": "2026-04-19 16:55",
+      "equity": 61.6249
+    },
+    {
+      "ts": "2026-04-20 00:20",
+      "equity": 66.3877
+    },
+    {
+      "ts": "2026-04-20 07:20",
+      "equity": 56.4295
+    },
+    {
+      "ts": "2026-04-20 15:20",
+      "equity": 58.3989
+    },
+    {
+      "ts": "2026-04-21 12:50",
+      "equity": 58.6276
+    },
+    {
+      "ts": "2026-04-21 20:05",
+      "equity": 62.3622
+    },
+    {
+      "ts": "2026-04-22 03:00",
+      "equity": 54.1284
+    },
+    {
+      "ts": "2026-04-22 16:35",
+      "equity": 54.248
+    },
+    {
+      "ts": "2026-04-23 12:45",
+      "equity": 63.4836
+    },
+    {
+      "ts": "2026-04-23 17:35",
+      "equity": 67.2142
+    },
+    {
+      "ts": "2026-04-24 03:20",
+      "equity": 69.6697
+    },
+    {
+      "ts": "2026-04-24 16:00",
+      "equity": 63.3135
+    },
+    {
+      "ts": "2026-04-25 16:00",
+      "equity": 56.858
+    },
+    {
+      "ts": "2026-04-26 03:35",
+      "equity": 59.4423
+    },
+    {
+      "ts": "2026-04-27 00:50",
+      "equity": 53.7396
+    },
+    {
+      "ts": "2026-04-27 06:00",
+      "equity": 47.1863
+    },
+    {
+      "ts": "2026-04-27 14:35",
+      "equity": 49.503
+    },
+    {
+      "ts": "2026-04-27 18:15",
+      "equity": 53.5507
+    },
+    {
+      "ts": "2026-04-28 17:30",
+      "equity": 57.1901
+    },
+    {
+      "ts": "2026-04-29 11:05",
+      "equity": 61.7666
+    },
+    {
+      "ts": "2026-04-29 13:45",
+      "equity": 56.2093
+    },
+    {
+      "ts": "2026-04-29 20:00",
+      "equity": 61.4453
+    },
+    {
+      "ts": "2026-04-30 00:45",
+      "equity": 52.2285
+    },
+    {
+      "ts": "2026-04-30 04:45",
+      "equity": 46.1191
+    },
+    {
+      "ts": "2026-04-30 09:30",
+      "equity": 42.2148
+    },
+    {
+      "ts": "2026-05-01 17:00",
+      "equity": 45.3323
+    },
+    {
+      "ts": "2026-05-03 22:00",
+      "equity": 46.3999
+    },
+    {
+      "ts": "2026-05-04 02:50",
+      "equity": 41.7706
+    },
+    {
+      "ts": "2026-05-04 10:30",
+      "equity": 38.3806
+    },
+    {
+      "ts": "2026-05-05 13:15",
+      "equity": 33.7601
+    },
+    {
+      "ts": "2026-05-06 09:30",
+      "equity": 39.0637
+    }
+  ]
+}
