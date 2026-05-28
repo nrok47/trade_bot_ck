@@ -400,6 +400,11 @@ h1{font-size:1.3rem;color:#fff;letter-spacing:3px;margin-bottom:4px;}
 .fng-fear{background:#7f1d1d;color:#fca5a5;}
 .fng-greed{background:#14532d;color:#86efac;}
 .fng-neutral{background:#1e3a5f;color:#93c5fd;}
+.run-btn{background:#1f6feb;color:#fff;border:none;padding:7px 18px;border-radius:8px;font-family:inherit;font-size:0.82rem;cursor:pointer;font-weight:bold;letter-spacing:1px;transition:background 0.15s;}
+.run-btn:hover{background:#388bfd;}
+.run-btn:disabled{background:#21262d;color:#8b949e;cursor:not-allowed;}
+.header-right{display:flex;align-items:center;gap:10px;}
+.countdown{font-size:0.72rem;color:var(--muted);min-width:68px;text-align:right;}
 /* Cards */
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;cursor:pointer;transition:all 0.15s;}
@@ -418,6 +423,10 @@ h1{font-size:1.3rem;color:#fff;letter-spacing:3px;margin-bottom:4px;}
 .long-txt{color:var(--green);}
 .short-txt{color:var(--red);}
 .skip-txt{color:var(--gray);}
+.adv-long{color:var(--green);font-size:0.72rem;margin-top:6px;font-weight:bold;}
+.adv-short{color:var(--red);font-size:0.72rem;margin-top:6px;font-weight:bold;}
+.adv-near{color:#eab308;font-size:0.72rem;margin-top:6px;}
+.adv-wait{color:var(--muted);font-size:0.72rem;margin-top:6px;}
 /* Chart */
 .chart-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:20px;}
 .section-title{font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;}
@@ -463,7 +472,11 @@ tr:last-child td{border-bottom:none;}
     <h1>⚡ SIGNAL ADVISOR</h1>
     <div class="ts" id="ts"></div>
   </div>
-  <div id="fngBadge" class="fng-badge"></div>
+  <div class="header-right">
+    <span id="countdown" class="countdown"></span>
+    <button type="button" class="run-btn" id="runBtn" onclick="runScan()">⟳ รัน</button>
+    <div id="fngBadge" class="fng-badge"></div>
+  </div>
 </div>
 
 <div class="cards" id="cards"></div>
@@ -500,6 +513,14 @@ function fmtP(p){
 }
 function dirCls(d){return d==="LONG"?"long-txt":d==="SHORT"?"short-txt":"skip-txt";}
 function dirIcon(d){return d==="LONG"?"▲ LONG":d==="SHORT"?"▼ SHORT":"— SKIP";}
+function getAdvice(d){
+  const pct = Math.abs(d.score) / d.eff_thresh;
+  if(d.direction==="LONG")  return ["adv-long","▲ เตรียมเข้า LONG"];
+  if(d.direction==="SHORT") return ["adv-short","▼ เตรียมเข้า SHORT"];
+  if(pct>=0.75) return ["adv-near","⚡ ใกล้ threshold — เฝ้าดู"];
+  if(pct>=0.40) return ["adv-wait","⏳ รอจังหวะ"];
+  return ["adv-wait","— สัญญาณอ่อน"];
+}
 function colorCell(s){
   if(!s) return '<span class="neut">—</span>';
   s = s.toString();
@@ -526,13 +547,15 @@ SYMBOLS.forEach(sym=>{
   const barCol = d.direction==="LONG"?"var(--green)":d.direction==="SHORT"?"var(--red)":"var(--gray)";
   const remaining = Math.max(d.eff_thresh - Math.abs(d.score), 0).toFixed(2);
   const nearLabel = pct >= 100 ? "✓ ผ่าน threshold" : `เหลือ ${remaining}`;
+  const [advCls, advTxt] = getAdvice(d);
   el.innerHTML = `
     <div class="card-sym">${sym}</div>
     <div class="card-price">${fmtP(d.price)}</div>
     <div class="card-dir ${dirCls(d.direction)}">${dirIcon(d.direction)}</div>
     <div class="card-score">score ${d.score>0?"+":""}${d.score.toFixed(2)} / ±${d.eff_thresh.toFixed(2)}</div>
     <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${barCol}"></div></div>
-    <div class="bar-label"><span>${pct}%</span><span>${nearLabel}</span></div>`;
+    <div class="bar-label"><span>${pct}%</span><span>${nearLabel}</span></div>
+    <div class="${advCls}">${advTxt}</div>`;
   cardsEl.appendChild(el);
 });
 
@@ -645,6 +668,39 @@ function renderDetail(sym){
 
 renderDetail("BTCUSDT");
 
+let _running = false;
+async function runScan(){
+  if(_running) return;
+  _running = true;
+  _autoSec = 0;
+  const btn = document.getElementById("runBtn");
+  btn.disabled = true;
+  btn.textContent = "กำลังรัน...";
+  document.getElementById("countdown").textContent = "กำลังรัน...";
+  try {
+    const r = await fetch("run_signal.php");
+    const j = await r.json();
+    if(j.ok){ location.reload(); }
+    else { alert("Error: " + j.msg); _running=false; btn.disabled=false; btn.textContent="⟳ รัน"; }
+  } catch(e) {
+    alert("เชื่อมต่อไม่ได้ — เปิดผ่าน XAMPP (http://localhost/...) ไม่ใช่ file://");
+    _running=false; btn.disabled=false; btn.textContent="⟳ รัน";
+  }
+}
+
+// Auto-refresh ทุก 3 นาที
+let _autoSec = 180;
+function _tick(){
+  if(_running) return;
+  if(_autoSec <= 0){ runScan(); return; }
+  const m = Math.floor(_autoSec/60);
+  const s = _autoSec % 60;
+  document.getElementById("countdown").textContent = `auto ${m}:${s.toString().padStart(2,"0")}`;
+  _autoSec--;
+}
+_tick();
+setInterval(_tick, 1000);
+
 // ── Log Table ──────────────────────────────────────────────────────────────
 (function(){
   if(!HISTORY || HISTORY.length === 0) return;
@@ -732,7 +788,14 @@ def main() -> None:
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(html)
         print(f"Report: {report_path}")
-        webbrowser.open(f"file:///{report_path.replace(os.sep, '/')}")
+        # คำนวณ relative path จาก htdocs เพื่อเปิดผ่าน localhost
+        htdocs = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+        try:
+            rel = os.path.relpath(report_path, htdocs).replace(os.sep, "/")
+            url = f"http://localhost/{rel}"
+        except ValueError:
+            url = f"file:///{report_path.replace(os.sep, '/')}"
+        webbrowser.open(url)
 
     elif args.watch:
         print(f"Watch mode — refresh ทุก {args.interval}s  (Ctrl+C หยุด)")
