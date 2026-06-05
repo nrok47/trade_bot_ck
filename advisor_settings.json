@@ -1,7 +1,16 @@
 {
-  "symbols": ["BTCUSDT", "DOGEUSDT", "BNBUSDT", "XRPUSDT"],
-  "score_threshold": 3.0,
-  "leverage": 8,
-  "tp_roe_pct": 30.0,
-  "sl_hard_roe_pct": 15.0
+    "symbols": [
+        "BTCUSDT",
+        "DOGEUSDT",
+        "BNBUSDT",
+        "XRPUSDT",
+        "PAXGUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "ADAUSDT"
+    ],
+    "score_threshold": 3,
+    "leverage": 8,
+    "tp_roe_pct": 30,
+    "sl_hard_roe_pct": 15
 }
